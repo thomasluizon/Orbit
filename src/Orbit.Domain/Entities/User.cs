@@ -605,6 +605,17 @@ public partial class User : Entity
         return awardable > 0;
     }
 
+    public Result ConsumeStreakFreezes(int count)
+    {
+        if (count <= 0)
+            return Result.Failure(DomainErrors.InvalidStreakGap);
+        if (StreakFreezesAccumulated < count)
+            return Result.Failure(DomainErrors.InsufficientStreakFreezes);
+
+        StreakFreezesAccumulated -= count;
+        return Result.Success();
+    }
+
     public Result ConsumeStreakFreeze()
     {
         if (StreakFreezesAccumulated <= 0)

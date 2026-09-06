@@ -153,4 +153,5 @@ public static class ErrorMessages
     public static readonly AppError AlreadyPaired = new(ErrorCodes.AlreadyPaired, "You already have an accountability pair with this person.");
     public static readonly AppError AlreadyCheckedIn = new(ErrorCodes.AlreadyCheckedIn, "You've already checked in for today.");
     public static readonly AppError StreakRepairUnavailable = new(ErrorCodes.StreakRepairUnavailable, "No streak repair is available for yesterday.");
+    public static readonly AppError StreakGapRepairUnavailable = new(ErrorCodes.StreakGapRepairUnavailable, "The selected dates cannot repair the entire gap ending yesterday.");
 }

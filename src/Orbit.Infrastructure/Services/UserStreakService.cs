@@ -81,6 +81,63 @@ public class UserStreakService(
             freezeDateSet);
     }
 
+    public async Task<UserStreakState?> EvaluateGapRepairAsync(
+        Guid userId,
+        DateOnly userToday,
+        IReadOnlyCollection<DateOnly> dates,
+        CancellationToken cancellationToken = default)
+    {
+        if (StreakFreeze.CreateGap(userId, dates, userToday).IsFailure)
+            return null;
+
+        var user = await repos.Users.FindOneTrackedAsync(
+            candidate => candidate.Id == userId,
+            cancellationToken: cancellationToken);
+        if (user is null)
+            return null;
+
+        var lookbackStart = userToday.AddDays(-AppConstants.MaxStreakLookbackDays);
+        var gapStart = dates.Min();
+        if (gapStart <= lookbackStart)
+            return null;
+
+        var (completions, freezes, eligibleHabits) =
+            await LoadStreakDataAsync(userId, lookbackStart, cancellationToken);
+        var contributingHabits = GetContributingHabits(eligibleHabits);
+        if (!contributingHabits.Any(habit => habit.FrequencyUnit is not null))
+            return null;
+
+        var expectedDates = HabitScheduleService.GetUnionScheduledDatesForStreak(
+            contributingHabits, lookbackStart, userToday,
+            TimeZoneHelper.FindTimeZone(user.TimeZone, userId: user.Id), user.WeekStartDay);
+        if (dates.Any(date => !expectedDates.Contains(date) || completions.Contains(date) || freezes.Contains(date)))
+            return null;
+
+        var precedingDate = gapStart.AddDays(-1);
+        if (!completions.Contains(precedingDate) && !freezes.Contains(precedingDate))
+            return null;
+
+        foreach (var month in dates.GroupBy(date => (date.Year, date.Month)))
+        {
+            var used = freezes.Count(date => date.Year == month.Key.Year && date.Month == month.Key.Month);
+            if (used + month.Count() > AppConstants.MaxStreakFreezesPerMonth)
+                return null;
+        }
+
+        var (currentStreak, _) = HabitScheduleService.ComputeStreakAsOf(
+            expectedDates, completions, freezes, lookbackStart, userToday);
+        var repairedDates = new HashSet<DateOnly>(freezes);
+        repairedDates.UnionWith(dates);
+        var (repairedStreak, lastActiveDate) = HabitScheduleService.ComputeStreakAsOf(
+            expectedDates, completions, repairedDates, lookbackStart, userToday);
+        if (repairedStreak <= currentStreak)
+            return null;
+
+        return new UserStreakState(repairedStreak,
+            Math.Max(user.LongestStreak, ComputeLongestStreak(expectedDates, completions, repairedDates)),
+            lastActiveDate);
+    }
+
     internal static StreakRepairEvaluation EvaluateRepair(
         User user,
         DateOnly userToday,

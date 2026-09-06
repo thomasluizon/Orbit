@@ -1,0 +1,73 @@
+using MediatR;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Orbit.Application.Behaviors;
+using Orbit.Application.Common;
+using Orbit.Application.Gamification.Queries;
+using Orbit.Domain.Common;
+using Orbit.Domain.Entities;
+using Orbit.Domain.Interfaces;
+
+namespace Orbit.Application.Gamification.Commands;
+
+public record RepairStreakGapCommand(Guid UserId, IReadOnlyCollection<DateOnly> Dates)
+    : IRequest<Result<StreakInfoResponse>>, IConcurrencyRetryable;
+
+public class RepairStreakGapCommandHandler(
+    IGenericRepository<User> userRepository,
+    IGenericRepository<StreakFreeze> streakFreezeRepository,
+    IUserDateService userDateService,
+    IUserStreakService userStreakService,
+    IFeatureFlagService featureFlagService,
+    IUnitOfWork unitOfWork,
+    ISender sender,
+    ILogger<RepairStreakGapCommandHandler> logger) : IRequestHandler<RepairStreakGapCommand, Result<StreakInfoResponse>>
+{
+    public async Task<Result<StreakInfoResponse>> Handle(
+        RepairStreakGapCommand request, CancellationToken cancellationToken)
+    {
+        var user = await userRepository.FindOneTrackedAsync(
+            candidate => candidate.Id == request.UserId, cancellationToken: cancellationToken);
+        if (user is null)
+            return Result.Failure<StreakInfoResponse>(ErrorMessages.UserNotFound);
+
+        var flags = await featureFlagService.GetEnabledKeysForUserAsync(request.UserId, cancellationToken);
+        if (!user.HasProAccess && !flags.Contains(FeatureFlagKeys.GamificationFreeTier))
+            return Result.PayGateFailure<StreakInfoResponse>("Streak insights are a Pro feature. Upgrade to unlock!");
+
+        var today = await userDateService.GetUserTodayAsync(request.UserId, cancellationToken);
+        var gap = StreakFreeze.CreateGap(request.UserId, request.Dates, today);
+        if (gap.IsFailure)
+            return gap.PropagateError<StreakInfoResponse>();
+        if (user.StreakFreezesAccumulated < gap.Value.Count)
+            return Result.Failure<StreakInfoResponse>(DomainErrors.InsufficientStreakFreezes);
+
+        var state = await userStreakService.EvaluateGapRepairAsync(
+            request.UserId, today, request.Dates, cancellationToken);
+        if (state is null)
+            return Result.Failure<StreakInfoResponse>(ErrorMessages.StreakGapRepairUnavailable);
+
+        var spent = user.ConsumeStreakFreezes(gap.Value.Count);
+        if (spent.IsFailure)
+            return spent.PropagateError<StreakInfoResponse>();
+
+        user.SetStreakState(state.CurrentStreak, state.LongestStreak, state.LastActiveDate);
+        foreach (var freeze in gap.Value)
+            await streakFreezeRepository.AddAsync(freeze, cancellationToken);
+
+        try
+        {
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception)
+        {
+            unitOfWork.ResetTracking();
+            if (DbUniqueViolation.IsUniqueViolation(exception))
+                return Result.Failure<StreakInfoResponse>(ErrorMessages.StreakGapRepairUnavailable);
+            throw;
+        }
+
+        logger.LogInformation("Streak gap repaired for {UserId} using {FreezeCount} freezes", request.UserId, gap.Value.Count);
+        return await sender.Send(new GetStreakInfoQuery(request.UserId), cancellationToken);
+    }
+}

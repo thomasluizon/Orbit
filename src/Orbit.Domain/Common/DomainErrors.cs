@@ -32,6 +32,8 @@ public static class DomainErrors
     public static readonly AppError ProUsersDoNotSeeAds = new("PRO_USERS_NO_ADS", "Pro users do not see ads");
     public static readonly AppError AdRewardLimitReached = new("AD_REWARD_LIMIT_REACHED", "Daily ad reward limit reached");
     public static readonly AppError NoStreakFreezesAccumulated = new("NO_STREAK_FREEZES", "No streak freezes accumulated");
+    public static readonly AppError InvalidStreakGap = new("INVALID_STREAK_GAP", "Select consecutive dates ending yesterday.");
+    public static readonly AppError InsufficientStreakFreezes = new("INSUFFICIENT_STREAK_FREEZES", "There are not enough banked freezes to repair the entire gap.");
     public static readonly AppError CalendarAutoSyncProRequired = new("calendar.autoSync.proRequired", "Upgrade to Pro to enable calendar auto-sync.");
     public static readonly AppError CalendarAutoSyncNotConnected = new("calendar.autoSync.notConnected", "Connect Google Calendar first.");
 

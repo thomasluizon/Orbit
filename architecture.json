@@ -703,6 +703,15 @@
       "responseDto": "StreakInfoResponse"
     },
     {
+      "controller": "StreakGapController",
+      "action": "RepairGap",
+      "httpMethod": "POST",
+      "routeTemplate": "/api/gamification/streak/repair-gap",
+      "authorization": "Authorize (class)",
+      "mediatrRequest": "RepairStreakGapCommand",
+      "responseDto": "StreakInfoResponse"
+    },
+    {
       "controller": "GamificationController",
       "action": "GetXpHistory",
       "httpMethod": "GET",
@@ -2373,6 +2382,12 @@
       "featureFolder": "Gamification"
     },
     {
+      "request": "RepairStreakGapCommand",
+      "response": "Result<StreakInfoResponse>",
+      "handlerFile": "src/Orbit.Application/Gamification/Commands/RepairStreakGapCommand.cs",
+      "featureFolder": "Gamification"
+    },
+    {
       "request": "ReportEventCommand",
       "response": "Result<ReportEventResponse>",
       "handlerFile": "src/Orbit.Application/Gamification/Commands/ReportEventCommand.cs",
@@ -2721,7 +2736,7 @@
       "Chat": 80,
       "ChecklistTemplates": 5,
       "Common": 36,
-      "Gamification": 31,
+      "Gamification": 33,
       "Goals": 35,
       "Habits": 75,
       "Marketing": 4,
@@ -2924,20 +2939,20 @@
       "Accountability": 9,
       "ApiKeys": 14,
       "Auth": 26,
-      "Behaviors": 13,
+      "Behaviors": 14,
       "Calendar": 16,
       "Challenges": 14,
       "Chat": 61,
       "ChecklistTemplates": 9,
-      "Common": 187,
-      "Gamification": 38,
+      "Common": 191,
+      "Gamification": 42,
       "Goals": 54,
       "Habits": 89,
       "Marketing": 6,
       "Notifications": 20,
       "Profile": 40,
       "Referrals": 13,
-      "Social": 35,
+      "Social": 36,
       "Subscriptions": 18,
       "Support": 4,
       "Tags": 14,
@@ -4013,6 +4028,17 @@
           "GetStreakInfoQuery",
           "RepairStreakCommand",
           "RepairStreakCommandHandler",
+          "StreakFreeze",
+          "User"
+        ]
+      },
+      {
+        "testClass": "RepairStreakGapCommandHandlerTests",
+        "file": "tests/Orbit.Application.Tests/Commands/Gamification/RepairStreakGapCommandHandlerTests.cs",
+        "references": [
+          "GetStreakInfoQuery",
+          "RepairStreakGapCommand",
+          "RepairStreakGapCommandHandler",
           "StreakFreeze",
           "User"
         ]
@@ -6218,6 +6244,13 @@
         ]
       },
       {
+        "testClass": "RepairStreakGapCommandValidatorTests",
+        "file": "tests/Orbit.Application.Tests/Validators/RepairStreakGapCommandValidatorTests.cs",
+        "references": [
+          "RepairStreakGapCommand"
+        ]
+      },
+      {
         "testClass": "RestoreGoalCommandValidatorTests",
         "file": "tests/Orbit.Application.Tests/Validators/RestoreGoalCommandValidatorTests.cs",
         "references": [
@@ -6559,6 +6592,14 @@
         "file": "tests/Orbit.Domain.Tests/Entities/StreakFreezeTests.cs",
         "references": [
           "StreakFreeze"
+        ]
+      },
+      {
+        "testClass": "StreakGapTests",
+        "file": "tests/Orbit.Domain.Tests/Entities/StreakGapTests.cs",
+        "references": [
+          "StreakFreeze",
+          "User"
         ]
       },
       {
@@ -6966,6 +7007,14 @@
           "GetOrCreateReferralCodeCommand",
           "GetReferralDashboardQuery",
           "GetReferralStatsQuery",
+          "User"
+        ]
+      },
+      {
+        "testClass": "StreakGapControllerTests",
+        "file": "tests/Orbit.Infrastructure.Tests/Controllers/StreakGapControllerTests.cs",
+        "references": [
+          "RepairStreakGapCommand",
           "User"
         ]
       },
@@ -7954,6 +8003,18 @@
         "file": "tests/Orbit.Infrastructure.Tests/Services/StreakFreezeAutoActivationServiceTests.cs",
         "references": [
           "Habit",
+          "StreakFreeze",
+          "User"
+        ]
+      },
+      {
+        "testClass": "StreakGapRepairTests",
+        "file": "tests/Orbit.Infrastructure.Tests/Services/StreakGapRepairTests.cs",
+        "references": [
+          "GetStreakInfoQuery",
+          "Habit",
+          "HabitLog",
+          "RepairStreakGapCommandHandler",
           "StreakFreeze",
           "User"
         ]
