@@ -144,10 +144,10 @@ public partial class HandlePlayNotificationCommandHandler(
         }
         else
         {
-            user.SetPlaySubscription(purchaseToken, state.ExpiresAt, state.Interval);
+            user.SetPlaySubscription(purchaseToken, state.ExpiresAt, state.Interval, state.IsInGracePeriod);
         }
 
-        if (notificationType == 3)
+        if (notificationType == 3 && !state.IsInGracePeriod)
             user.RecordSubscriptionLapseReason(
                 SubscriptionSource.GooglePlay, SubscriptionLapseReason.Canceled);
 
