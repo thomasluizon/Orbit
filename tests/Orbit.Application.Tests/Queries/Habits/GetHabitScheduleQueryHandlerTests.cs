@@ -690,6 +690,24 @@ public class GetHabitScheduleQueryHandlerTests
         }
     }
 
+    [Fact]
+    public async Task Handle_SearchMatchesNoDescendant_ReturnsEmptyList()
+    {
+        var parent = CreateTestHabit(title: "Morning Routine");
+        var child = CreateTestHabit(
+            title: "Exercise",
+            description: "Strength training",
+            parentHabitId: parent.Id);
+        child.AddTag(Tag.Create(UserId, "Fitness", "#FF0000").Value);
+        SetupHabits(parent, child);
+
+        var query = new GetHabitScheduleQuery(UserId, null, null, Search: "Meditation");
+        var result = await _handler.Handle(query, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Items.Should().BeEmpty();
+    }
+
     [Theory]
     [InlineData("description", true)]
     [InlineData("description", false)]
