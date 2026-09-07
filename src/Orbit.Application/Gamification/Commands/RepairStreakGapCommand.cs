@@ -51,7 +51,8 @@ public class RepairStreakGapCommandHandler(
         if (spent.IsFailure)
             return spent.PropagateError<StreakInfoResponse>();
 
-        user.SetStreakState(state.CurrentStreak, state.LongestStreak, state.LastActiveDate);
+        user.RestoreStreakAfterGapRepair(state.CurrentStreak, state.LongestStreak, state.LastActiveDate,
+            gap.Value[0].UsedOnDate.AddDays(-1));
         foreach (var freeze in gap.Value)
             await streakFreezeRepository.AddAsync(freeze, cancellationToken);
 

@@ -8,6 +8,80 @@ public class StreakGapTests
 {
     private static readonly DateOnly Today = new(2026, 9, 6);
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RestoreStreakAfterGapRepair_PreservesActualCursor(bool recalculated)
+    {
+        var user = User.Create("Test", "test@example.com").Value;
+        user.SetStreakState(7, 7, Today.AddDays(-10));
+        user.AwardStreakFreezeIfEligible();
+        user.SetStreakState(14, 14, Today.AddDays(-3));
+        if (recalculated)
+        {
+            user.SetStreakState(0, 14, null);
+            user.SetStreakState(0, 14, null);
+            user.LastFreezeAwardStreak.Should().Be(0);
+        }
+
+        user.RestoreStreakAfterGapRepair(14, 14, Today.AddDays(-1), Today.AddDays(-3));
+
+        user.LastFreezeAwardStreak.Should().Be(7);
+        user.PreGapFreezeAwardStreak.Should().BeNull();
+        user.PreGapLastActiveDate.Should().BeNull();
+    }
+
+    [Fact]
+    public void RestoreStreakAfterGapRepair_PreservesCursorAdvancedAtFullBank()
+    {
+        var user = User.Create("Test", "test@example.com").Value;
+        user.SetStreakState(21, 21, Today.AddDays(-10));
+        user.AwardStreakFreezeIfEligible();
+        user.SetStreakState(28, 28, Today.AddDays(-3));
+        user.AwardStreakFreezeIfEligible().Should().BeFalse();
+        user.SetStreakState(0, 28, null);
+        user.ConsumeStreakFreezes(2);
+
+        user.RestoreStreakAfterGapRepair(28, 28, Today.AddDays(-1), Today.AddDays(-3));
+
+        user.LastFreezeAwardStreak.Should().Be(28);
+        user.AwardStreakFreezeIfEligible().Should().BeFalse();
+        user.StreakFreezesAccumulated.Should().Be(1);
+    }
+
+    [Fact]
+    public void RestoreStreakAfterGapRepair_DoesNotRestoreCursorFromDifferentRun()
+    {
+        var user = User.Create("Test", "test@example.com").Value;
+        user.SetStreakState(14, 14, Today.AddDays(-20));
+        user.AwardStreakFreezeIfEligible();
+        user.SetStreakState(0, 14, null);
+        user.SetStreakState(6, 14, Today.AddDays(-3));
+        user.ConsumeStreakFreezes(2);
+
+        user.RestoreStreakAfterGapRepair(6, 14, Today.AddDays(-1), Today.AddDays(-3));
+        user.UpdateStreak(Today);
+
+        user.AwardStreakFreezeIfEligible().Should().BeTrue();
+        user.StreakFreezesAccumulated.Should().Be(1);
+        user.LastFreezeAwardStreak.Should().Be(7);
+    }
+
+    [Fact]
+    public void ResetAccount_ClearsSavedAwardCursor()
+    {
+        var user = User.Create("Test", "test@example.com").Value;
+        user.SetStreakState(14, 14, Today.AddDays(-3));
+        user.AwardStreakFreezeIfEligible();
+        user.SetStreakState(0, 14, null);
+
+        user.ResetAccount();
+
+        user.PreGapFreezeAwardStreak.Should().BeNull();
+        user.PreGapLastActiveDate.Should().BeNull();
+        user.LastFreezeAwardStreak.Should().Be(0);
+    }
+
     [Fact]
     public void CreateGap_UnorderedConsecutiveDates_CreatesOneFreezePerDay()
     {

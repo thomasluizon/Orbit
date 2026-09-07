@@ -74,6 +74,8 @@ public partial class User : Entity
     public DateOnly? LastActiveDate { get; private set; }
     public int StreakFreezesAccumulated { get; private set; } = 0;
     public int LastFreezeAwardStreak { get; private set; } = 0;
+    public int? PreGapFreezeAwardStreak { get; private set; }
+    public DateOnly? PreGapLastActiveDate { get; private set; }
     public string? ThemePreference { get; private set; }
     public string? ColorScheme { get; private set; }
     public string? PublicProfileSlug { get; private set; }
@@ -574,11 +576,25 @@ public partial class User : Entity
         var normalizedStreak = Math.Max(0, currentStreak);
         if (normalizedStreak < CurrentStreak)
         {
+            PreGapFreezeAwardStreak = LastFreezeAwardStreak;
+            PreGapLastActiveDate = LastActiveDate;
             LastFreezeAwardStreak = 0;
         }
         CurrentStreak = normalizedStreak;
         LongestStreak = Math.Max(CurrentStreak, longestStreak);
         LastActiveDate = lastActiveDate;
+    }
+
+    public void RestoreStreakAfterGapRepair(
+        int currentStreak, int longestStreak, DateOnly? lastActiveDate, DateOnly precedingDate)
+    {
+        var awardCursor = PreGapLastActiveDate == precedingDate && PreGapFreezeAwardStreak.HasValue
+            ? PreGapFreezeAwardStreak.Value
+            : LastFreezeAwardStreak;
+        SetStreakState(currentStreak, longestStreak, lastActiveDate);
+        LastFreezeAwardStreak = awardCursor;
+        PreGapFreezeAwardStreak = null;
+        PreGapLastActiveDate = null;
     }
 
     public bool AwardStreakFreezeIfEligible(int maxAccumulated = 3, int daysPerFreeze = 7)
@@ -644,6 +660,8 @@ public partial class User : Entity
         LastActiveDate = null;
         StreakFreezesAccumulated = 0;
         LastFreezeAwardStreak = 0;
+        PreGapFreezeAwardStreak = null;
+        PreGapLastActiveDate = null;
         HasImportedCalendar = false;
         GoogleAccessToken = null;
         GoogleRefreshToken = null;

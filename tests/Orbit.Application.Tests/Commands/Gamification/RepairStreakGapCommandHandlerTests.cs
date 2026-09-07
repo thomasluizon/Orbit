@@ -65,6 +65,32 @@ public class RepairStreakGapCommandHandlerTests
         _user.StreakFreezesAccumulated.Should().Be(0);
         staged.Should().OnlyContain(freeze => freeze.UserId == _user.Id);
         await _unitOfWork.Received(1).SaveChangesAsync(Arg.Any<CancellationToken>());
+
+        _user.UpdateStreak(Today);
+        _user.AwardStreakFreezeIfEligible();
+
+        _user.CurrentStreak.Should().Be(15);
+        _user.StreakFreezesAccumulated.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RepairedStreak_AwardsOnlyAtNextNewMilestone()
+    {
+        Bank(2);
+        var result = await _handler.Handle(new(_user.Id, Dates), CancellationToken.None);
+        result.IsSuccess.Should().BeTrue();
+
+        for (var offset = 0; offset < 6; offset++)
+        {
+            _user.UpdateStreak(Today.AddDays(offset));
+            _user.AwardStreakFreezeIfEligible();
+            _user.StreakFreezesAccumulated.Should().Be(0);
+        }
+
+        _user.UpdateStreak(Today.AddDays(6));
+        _user.AwardStreakFreezeIfEligible().Should().BeTrue();
+        _user.CurrentStreak.Should().Be(21);
+        _user.StreakFreezesAccumulated.Should().Be(1);
     }
 
     [Fact]

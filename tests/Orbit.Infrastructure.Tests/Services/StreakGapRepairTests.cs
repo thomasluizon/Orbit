@@ -1,6 +1,7 @@
 using System.Linq.Expressions;
 using FluentAssertions;
 using MediatR;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Orbit.Application.Common;
@@ -13,6 +14,7 @@ using Orbit.Domain.Enums;
 using Orbit.Domain.Interfaces;
 using Orbit.Domain.Models;
 using Orbit.Infrastructure.Services;
+using Orbit.Infrastructure.Persistence;
 
 namespace Orbit.Infrastructure.Tests.Services;
 
@@ -40,6 +42,90 @@ public class StreakGapRepairTests
         _freezes.FindAsync(Arg.Any<Expression<Func<StreakFreeze, bool>>>(), Arg.Any<CancellationToken>())
             .Returns(call => _persistedFreezes.Where(call.Arg<Expression<Func<StreakFreeze, bool>>>().Compile()).ToList());
         _habit = SetHistory(_today, 2);
+    }
+
+    [Theory]
+    [InlineData(1, 0)]
+    [InlineData(6, 0)]
+    [InlineData(7, 1)]
+    public async Task RepairedRun_LoggedCompletionsAwardOnlyNewMilestones(int completions, int expectedBank)
+    {
+        _habit = SetHistory(_today, 2, precedingCompletions: 14);
+        _dateService.GetUserTodayAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(_today.AddDays(-2));
+        await _service.RecalculateAsync(_user.Id);
+        _user.CurrentStreak.Should().Be(14);
+        _user.StreakFreezesAccumulated.Should().Be(2);
+        _user.LastFreezeAwardStreak.Should().Be(14);
+
+        _dateService.GetUserTodayAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(_today);
+        await _service.RecalculateAsync(_user.Id, awardFreezeIfEligible: false);
+        await _service.RecalculateAsync(_user.Id, awardFreezeIfEligible: false);
+        _user.CurrentStreak.Should().Be(0);
+        _user.LastFreezeAwardStreak.Should().Be(0);
+
+        var staged = new List<StreakFreeze>();
+        _freezes.AddAsync(Arg.Any<StreakFreeze>(), Arg.Any<CancellationToken>())
+            .Returns(call => { staged.Add(call.Arg<StreakFreeze>()); return Task.CompletedTask; });
+        var unitOfWork = Substitute.For<IUnitOfWork>();
+        unitOfWork.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(_ =>
+        {
+            _persistedFreezes.AddRange(staged);
+            return Task.FromResult(3);
+        });
+        var flags = Substitute.For<IFeatureFlagService>();
+        flags.GetEnabledKeysForUserAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(Array.Empty<string>());
+        _users.GetByIdAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(_user);
+        var queryHandler = new GetStreakInfoQueryHandler(_users, _freezes, _dateService, _service,
+            flags, Substitute.For<IProductAnalytics>(), NullLogger<GetStreakInfoQueryHandler>.Instance);
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<GetStreakInfoQuery>(), Arg.Any<CancellationToken>())
+            .Returns(call => queryHandler.Handle(call.Arg<GetStreakInfoQuery>(), call.Arg<CancellationToken>()));
+        var handler = new RepairStreakGapCommandHandler(_users, _freezes, _dateService, _service,
+            flags, unitOfWork, sender, NullLogger<RepairStreakGapCommandHandler>.Instance);
+
+        var result = await handler.Handle(new(_user.Id, [_today.AddDays(-2), _today.AddDays(-1)]), CancellationToken.None);
+        result.IsSuccess.Should().BeTrue();
+        result.Value.CurrentStreak.Should().Be(14);
+        result.Value.StreakFreezesAccumulated.Should().Be(0);
+
+        for (var offset = 0; offset < completions; offset++)
+        {
+            var date = _today.AddDays(offset);
+            _dateService.GetUserTodayAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(date);
+            _habit.Log(date, advanceDueDate: false);
+            await _service.RecalculateAsync(_user.Id);
+            if (offset < 6)
+                _user.StreakFreezesAccumulated.Should().Be(0);
+        }
+
+        _user.CurrentStreak.Should().Be(14 + completions);
+        _user.StreakFreezesAccumulated.Should().Be(expectedBank);
+        _user.LastFreezeAwardStreak.Should().Be(expectedBank == 0 ? 14 : 21);
+    }
+
+    [Fact]
+    public async Task SavedCursor_SurvivesUserReloadBeforeRepair()
+    {
+        var options = new DbContextOptionsBuilder<OrbitDbContext>()
+            .UseInMemoryDatabase($"StreakGapCursor_{Guid.NewGuid()}").Options;
+        await using (var context = new OrbitDbContext(options))
+        {
+            _user.SetStreakState(14, 14, _today.AddDays(-3));
+            _user.AwardStreakFreezeIfEligible();
+            _user.SetStreakState(0, 14, null);
+            context.Users.Add(_user);
+            await context.SaveChangesAsync();
+        }
+
+        await using var reloaded = new OrbitDbContext(options);
+        var user = await reloaded.Users.SingleAsync(candidate => candidate.Id == _user.Id);
+        user.ConsumeStreakFreezes(2).IsSuccess.Should().BeTrue();
+        user.RestoreStreakAfterGapRepair(14, 14, _today.AddDays(-1), _today.AddDays(-3));
+        user.UpdateStreak(_today);
+
+        user.AwardStreakFreezeIfEligible().Should().BeFalse();
+        user.StreakFreezesAccumulated.Should().Be(0);
+        user.LastFreezeAwardStreak.Should().Be(14);
     }
 
     [Theory]
@@ -193,14 +279,14 @@ public class StreakGapRepairTests
     private Task<UserStreakState?> Evaluate() =>
         _service.EvaluateGapRepairAsync(_user.Id, _today, [_today.AddDays(-2), _today.AddDays(-1)]);
 
-    private Habit SetHistory(DateOnly today, int gapLength, int frequencyQuantity = 1)
+    private Habit SetHistory(DateOnly today, int gapLength, int frequencyQuantity = 1, int precedingCompletions = 3)
     {
-        var createdOn = today.AddDays(-gapLength - 3);
+        var createdOn = today.AddDays(-gapLength - precedingCompletions);
         var habit = Habit.Create(new HabitCreateParams(_user.Id, "Run", FrequencyUnit.Day, frequencyQuantity,
             DueDate: createdOn)).Value;
         typeof(Habit).GetProperty(nameof(Habit.CreatedAtUtc))!.SetValue(habit,
             createdOn.ToDateTime(new TimeOnly(12, 0), DateTimeKind.Utc));
-        for (var offset = 0; offset < 3; offset++)
+        for (var offset = 0; offset < precedingCompletions; offset++)
             habit.Log(createdOn.AddDays(offset), advanceDueDate: false);
         _habits.FindAsync(Arg.Any<Expression<Func<Habit, bool>>>(), Arg.Any<CancellationToken>()).Returns([habit]);
         _logs.FindAsync(Arg.Any<Expression<Func<HabitLog, bool>>>(), Arg.Any<CancellationToken>())
