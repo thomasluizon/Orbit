@@ -2929,7 +2929,7 @@
       "Challenges": 14,
       "Chat": 61,
       "ChecklistTemplates": 9,
-      "Common": 187,
+      "Common": 188,
       "Gamification": 38,
       "Goals": 54,
       "Habits": 89,
@@ -4710,6 +4710,8 @@
         "testClass": "HandlePlayNotificationCommandHandlerTests",
         "file": "tests/Orbit.Application.Tests/Commands/Subscriptions/HandlePlayNotificationCommandHandlerTests.cs",
         "references": [
+          "GetSubscriptionStatusQuery",
+          "GetSubscriptionStatusQueryHandler",
           "HandlePlayNotificationCommand",
           "HandlePlayNotificationCommandHandler",
           "ProcessedPlayNotification",
@@ -4726,6 +4728,11 @@
           "ProcessedStripeEvent",
           "User"
         ]
+      },
+      {
+        "testClass": "PlayBillingTestClient",
+        "file": "tests/Orbit.Application.Tests/Commands/Subscriptions/PlayBillingTestClient.cs",
+        "references": []
       },
       {
         "testClass": "VerifyPlayPurchaseCommandHandlerTests",
