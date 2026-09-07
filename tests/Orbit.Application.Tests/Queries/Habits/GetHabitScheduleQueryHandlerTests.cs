@@ -602,19 +602,41 @@ public class GetHabitScheduleQueryHandlerTests
             .Should().Contain(new FrequencyUnit?[] { FrequencyUnit.Day, FrequencyUnit.Week, null });
     }
 
-    [Fact]
-    public async Task Handle_SearchMatchesChildTitle_ReturnsParent()
+    [Theory]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    [InlineData(3, true)]
+    [InlineData(1, false)]
+    [InlineData(2, false)]
+    [InlineData(3, false)]
+    public async Task Handle_SearchMatchesDescendantTitle_ReturnsParentWithMatchMetadata(
+        int depth, bool withDateRange)
     {
         var parent = CreateTestHabit(title: "Morning Routine", dueDate: Today);
-        var child = CreateTestHabit(title: "Meditation", dueDate: Today, parentHabitId: parent.Id);
-        SetupHabits(parent, child);
+        var unrelated = CreateTestHabit(title: "Read", dueDate: Today);
+        var habits = new List<Habit> { parent, unrelated };
+        var ancestor = parent;
+        for (var level = 1; level < depth; level++)
+        {
+            var intermediate = CreateTestHabit(title: $"Step {level}", parentHabitId: ancestor.Id);
+            habits.Add(intermediate);
+            ancestor = intermediate;
+        }
+        var descendant = CreateTestHabit(title: "Meditation", parentHabitId: ancestor.Id);
+        habits.Add(descendant);
+        SetupHabits(habits.ToArray());
 
-        var query = new GetHabitScheduleQuery(UserId, Today, Today.AddDays(6), Search: "Meditation");
+        var query = new GetHabitScheduleQuery(
+            UserId,
+            withDateRange ? Today : null,
+            withDateRange ? Today.AddDays(6) : null,
+            Search: "Meditation");
         var result = await _handler.Handle(query, CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
-        result.Value.Items.Should().HaveCount(1);
-        result.Value.Items[0].Title.Should().Be("Morning Routine");
+        var item = result.Value.Items.Should().ContainSingle().Subject;
+        item.Id.Should().Be(parent.Id);
+        item.SearchMatches.Should().Equal(new SearchMatchField("child", "Meditation"));
     }
 
     [Fact]

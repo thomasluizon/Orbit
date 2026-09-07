@@ -354,6 +354,8 @@ internal static class HabitScheduleFilters
 
             if (FuzzyMatcher.FuzzyContains(child.Title, ctx.Search!))
                 matches.Add(new SearchMatchField("child", child.Title));
+
+            AddChildSearchMatches(matches, child.Id, ctx);
         }
     }
 
