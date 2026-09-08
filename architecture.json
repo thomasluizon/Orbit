@@ -8012,6 +8012,7 @@
         "file": "tests/Orbit.Infrastructure.Tests/Services/StreakGapRepairTests.cs",
         "references": [
           "GetStreakInfoQuery",
+          "GetStreakInfoQueryHandler",
           "Habit",
           "HabitLog",
           "RepairStreakGapCommandHandler",
