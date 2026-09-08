@@ -24,7 +24,7 @@ public class StreakGapTests
             user.LastFreezeAwardStreak.Should().Be(0);
         }
 
-        user.RestoreStreakAfterGapRepair(14, 14, Today.AddDays(-1), Today.AddDays(-3));
+        user.RestoreStreakAfterGapRepair(14, 14, Today.AddDays(-1), Today.AddDays(-3), preGapStreak: 14);
 
         user.LastFreezeAwardStreak.Should().Be(expectedCursor);
         user.PreGapFreezeAwardStreak.Should().BeNull();
@@ -42,7 +42,7 @@ public class StreakGapTests
         user.SetStreakState(0, 28, null);
         user.ConsumeStreakFreezes(2);
 
-        user.RestoreStreakAfterGapRepair(28, 28, Today.AddDays(-1), Today.AddDays(-3));
+        user.RestoreStreakAfterGapRepair(28, 28, Today.AddDays(-1), Today.AddDays(-3), preGapStreak: 28);
 
         user.LastFreezeAwardStreak.Should().Be(28);
         user.AwardStreakFreezeIfEligible().Should().BeFalse();
@@ -59,7 +59,7 @@ public class StreakGapTests
         user.SetStreakState(6, 14, Today.AddDays(-3));
         user.ConsumeStreakFreezes(2);
 
-        user.RestoreStreakAfterGapRepair(6, 14, Today.AddDays(-1), Today.AddDays(-3));
+        user.RestoreStreakAfterGapRepair(6, 14, Today.AddDays(-1), Today.AddDays(-3), preGapStreak: 6);
         user.UpdateStreak(Today);
 
         user.AwardStreakFreezeIfEligible().Should().BeTrue();

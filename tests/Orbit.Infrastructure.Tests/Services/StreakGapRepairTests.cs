@@ -120,7 +120,7 @@ public class StreakGapRepairTests
         await using var reloaded = new OrbitDbContext(options);
         var user = await reloaded.Users.SingleAsync(candidate => candidate.Id == _user.Id);
         user.ConsumeStreakFreezes(2).IsSuccess.Should().BeTrue();
-        user.RestoreStreakAfterGapRepair(14, 14, _today.AddDays(-1), _today.AddDays(-3));
+        user.RestoreStreakAfterGapRepair(14, 14, _today.AddDays(-1), _today.AddDays(-3), preGapStreak: 14);
         user.UpdateStreak(_today);
 
         user.AwardStreakFreezeIfEligible().Should().BeFalse();
@@ -150,7 +150,7 @@ public class StreakGapRepairTests
         user.PreGapLastActiveDate.Should().BeNull();
         user.LastFreezeAwardStreak.Should().Be(0);
         user.ConsumeStreakFreezes(2).IsSuccess.Should().BeTrue();
-        user.RestoreStreakAfterGapRepair(14, 14, _today.AddDays(-1), _today.AddDays(-3));
+        user.RestoreStreakAfterGapRepair(14, 14, _today.AddDays(-1), _today.AddDays(-3), preGapStreak: 14);
         user.UpdateStreak(_today);
 
         user.AwardStreakFreezeIfEligible().Should().BeFalse();
@@ -322,6 +322,46 @@ public class StreakGapRepairTests
 
         state!.PrecedingScheduledDate.Should().Be(_today.AddDays(-8));
         state.PrecedingScheduledDate.Should().NotBe(_today.AddDays(-2));
+    }
+
+    /// <summary>
+    /// A second decrease must not overwrite the snapshot taken at the FIRST one. Log, unlog and relog
+    /// today after missing yesterday: the first recalculation saves the cursor that identifies the
+    /// still-repairable gap, and the unlog recalculation used to replace it with one describing the
+    /// break itself. Repair then fell through to the derived cursor and skipped an ungranted milestone.
+    /// </summary>
+    [Fact]
+    public void RepeatedDecrease_KeepsTheSnapshotFromTheFirstBreak()
+    {
+        _user.SetStreakState(13, 13, _today.AddDays(-2));
+        _user.AwardStreakFreezeIfEligible();
+        _user.LastFreezeAwardStreak.Should().Be(7);
+
+        _user.SetStreakState(0, 13, null);
+        _user.SetStreakState(1, 13, _today);
+        _user.SetStreakState(0, 13, null);
+
+        _user.PreGapFreezeAwardStreak.Should().Be(7);
+        _user.PreGapLastActiveDate.Should().Be(_today.AddDays(-2));
+    }
+
+    /// <summary>
+    /// The pre-migration row, whose snapshot fields are null. The fallback used to round the FULL
+    /// repaired streak down, so a milestone crossed by a completion AFTER the gap was recorded as
+    /// already awarded and its freeze was never granted. The cursor is now bounded by the streak going
+    /// INTO the gap, leaving the newly crossed milestone awardable.
+    /// </summary>
+    [Fact]
+    public void LegacyRowWithNoSnapshot_LeavesAPostGapMilestoneAwardable()
+    {
+        _user.SetStreakState(6, 6, _today.AddDays(-2));
+        _user.PreGapFreezeAwardStreak.Should().BeNull();
+
+        _user.RestoreStreakAfterGapRepair(7, 7, _today, _today.AddDays(-2), preGapStreak: 6);
+
+        _user.LastFreezeAwardStreak.Should().Be(0);
+        _user.AwardStreakFreezeIfEligible().Should().BeTrue();
+        _user.StreakFreezesAccumulated.Should().Be(1);
     }
 
     [Fact]

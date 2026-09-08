@@ -579,8 +579,12 @@ public partial class User : Entity
         var normalizedStreak = Math.Max(0, currentStreak);
         if (normalizedStreak < CurrentStreak)
         {
-            PreGapFreezeAwardStreak = LastFreezeAwardStreak;
-            PreGapLastActiveDate = LastActiveDate;
+            if (PreGapFreezeAwardStreak is null)
+            {
+                PreGapFreezeAwardStreak = LastFreezeAwardStreak;
+                PreGapLastActiveDate = LastActiveDate;
+            }
+
             LastFreezeAwardStreak = 0;
         }
         CurrentStreak = normalizedStreak;
@@ -588,12 +592,19 @@ public partial class User : Entity
         LastActiveDate = lastActiveDate;
     }
 
+    /// <param name="preGapStreak">
+    /// The streak as of <paramref name="precedingDate"/>, used only when no saved snapshot matches.
+    /// It bounds the fallback cursor to what was earned BEFORE the gap. Rounding the full repaired
+    /// streak down instead marked milestones crossed by completions AFTER the gap as already awarded,
+    /// so a pre-migration row could spend its banked freeze and never receive the one it just earned.
+    /// </param>
     public void RestoreStreakAfterGapRepair(
-        int currentStreak, int longestStreak, DateOnly? lastActiveDate, DateOnly precedingDate)
+        int currentStreak, int longestStreak, DateOnly? lastActiveDate, DateOnly precedingDate,
+        int preGapStreak)
     {
         var awardCursor = PreGapLastActiveDate == precedingDate && PreGapFreezeAwardStreak.HasValue
             ? PreGapFreezeAwardStreak.Value
-            : GetEligibleFreezeAwardStreak(currentStreak, DefaultStreakDaysPerFreeze);
+            : GetEligibleFreezeAwardStreak(Math.Min(preGapStreak, currentStreak), DefaultStreakDaysPerFreeze);
         SetStreakState(currentStreak, longestStreak, lastActiveDate);
         LastFreezeAwardStreak = awardCursor;
         PreGapFreezeAwardStreak = null;

@@ -162,9 +162,15 @@ public class UserStreakService(
 
         // The predecessor travels WITH the state. The handler restores the award cursor against it, and
         // deriving it there as `gapStart - 1` was the same calendar-versus-schedule mistake one layer up.
+        // The streak AS OF the predecessor, which bounds the fallback award cursor. Without it the
+        // domain rounded the full repaired streak down and marked milestones crossed AFTER the gap as
+        // already awarded, so a row with no saved snapshot spent a freeze and never received the one it
+        // had just earned.
+        var (preGapStreak, _) = HabitScheduleService.ComputeStreakAsOf(
+            expectedDates, completions, freezes, lookbackStart, precedingDate);
         return new UserStreakState(repairedStreak,
             Math.Max(user.LongestStreak, ComputeLongestStreak(expectedDates, completions, repairedDates)),
-            lastActiveDate, precedingDate);
+            lastActiveDate, precedingDate, preGapStreak);
     }
 
     internal static StreakRepairEvaluation EvaluateRepair(

@@ -55,7 +55,8 @@ public class RepairStreakGapCommandHandler(
         // day. On a sparse cadence those differ, the cursor match then failed, and the derived-cursor
         // fallback marked a newly crossed milestone as awarded without granting its freeze.
         user.RestoreStreakAfterGapRepair(state.CurrentStreak, state.LongestStreak, state.LastActiveDate,
-            state.PrecedingScheduledDate ?? gap.Value[0].UsedOnDate.AddDays(-1));
+            state.PrecedingScheduledDate ?? gap.Value[0].UsedOnDate.AddDays(-1),
+            state.PreGapStreak);
         foreach (var freeze in gap.Value)
             await streakFreezeRepository.AddAsync(freeze, cancellationToken);
 
