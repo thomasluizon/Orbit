@@ -64,7 +64,7 @@ public class GetRetrospectiveToolTests
             Arg.Is<GetRetrospectiveQuery>(q =>
                 q.UserId == UserId &&
                 q.Period == "month" &&
-                q.DateFrom == Today.AddDays(-30) &&
+                q.DateTo.DayNumber - q.DateFrom.DayNumber + 1 == 30 &&
                 q.DateTo == Today),
             Arg.Any<CancellationToken>());
     }

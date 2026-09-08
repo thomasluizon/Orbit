@@ -215,7 +215,7 @@ public class GamificationControllerTests
         result.Should().BeOfType<OkObjectResult>();
         await _mediator.Received(1).Send(
             Arg.Is<GetRecapQuery>(query =>
-                query.DateFrom == today.AddDays(-30)
+                query.DateTo.DayNumber - query.DateFrom.DayNumber + 1 == 30
                 && query.DateTo == today
                 && query.ClosedYear == null
                 && query.ClosedMonth == null),
