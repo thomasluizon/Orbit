@@ -63,25 +63,7 @@ public class StreakGapRepairTests
         _user.CurrentStreak.Should().Be(0);
         _user.LastFreezeAwardStreak.Should().Be(0);
 
-        var staged = new List<StreakFreeze>();
-        _freezes.AddAsync(Arg.Any<StreakFreeze>(), Arg.Any<CancellationToken>())
-            .Returns(call => { staged.Add(call.Arg<StreakFreeze>()); return Task.CompletedTask; });
-        var unitOfWork = Substitute.For<IUnitOfWork>();
-        unitOfWork.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(_ =>
-        {
-            _persistedFreezes.AddRange(staged);
-            return Task.FromResult(3);
-        });
-        var flags = Substitute.For<IFeatureFlagService>();
-        flags.GetEnabledKeysForUserAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(Array.Empty<string>());
-        _users.GetByIdAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(_user);
-        var queryHandler = new GetStreakInfoQueryHandler(_users, _freezes, _dateService, _service,
-            flags, Substitute.For<IProductAnalytics>(), NullLogger<GetStreakInfoQueryHandler>.Instance);
-        var sender = Substitute.For<ISender>();
-        sender.Send(Arg.Any<GetStreakInfoQuery>(), Arg.Any<CancellationToken>())
-            .Returns(call => queryHandler.Handle(call.Arg<GetStreakInfoQuery>(), call.Arg<CancellationToken>()));
-        var handler = new RepairStreakGapCommandHandler(_users, _freezes, _dateService, _service,
-            flags, unitOfWork, sender, NullLogger<RepairStreakGapCommandHandler>.Instance);
+        var (handler, _) = BuildRepairHandler();
 
         var result = await handler.Handle(new(_user.Id, [_today.AddDays(-2), _today.AddDays(-1)]), CancellationToken.None);
         result.IsSuccess.Should().BeTrue();
@@ -325,13 +307,18 @@ public class StreakGapRepairTests
     }
 
     /// <summary>
-    /// A second decrease must not overwrite the snapshot taken at the FIRST one. Log, unlog and relog
-    /// today after missing yesterday: the first recalculation saves the cursor that identifies the
-    /// still-repairable gap, and the unlog recalculation used to replace it with one describing the
-    /// break itself. Repair then fell through to the derived cursor and skipped an ungranted milestone.
+    /// A second decrease must not replace the snapshot taken at the FIRST one. The first break saves
+    /// the cursor identifying the still-repairable gap; a later decrease happens while the streak is
+    /// already broken, and overwriting swapped (7, the day before the gap) for (0, today), after which
+    /// repair fell through to the derived cursor and skipped a milestone that was never granted.
+    ///
+    /// Asserted on the entity rather than through RecalculateAsync deliberately: this fixture cannot
+    /// produce the increase-then-decrease the bug needs, because Unlog leaves the recalculated streak
+    /// at 1 rather than returning it to 0, so a service-level version of this test passes with the fix
+    /// reverted and proves nothing. The handler-level regression below covers the wiring.
     /// </summary>
     [Fact]
-    public void RepeatedDecrease_KeepsTheSnapshotFromTheFirstBreak()
+    public void ASecondDecrease_KeepsTheSnapshotFromTheFirstBreak()
     {
         _user.SetStreakState(13, 13, _today.AddDays(-2));
         _user.AwardStreakFreezeIfEligible();
@@ -346,22 +333,36 @@ public class StreakGapRepairTests
     }
 
     /// <summary>
-    /// The pre-migration row, whose snapshot fields are null. The fallback used to round the FULL
-    /// repaired streak down, so a milestone crossed by a completion AFTER the gap was recorded as
-    /// already awarded and its freeze was never granted. The cursor is now bounded by the streak going
-    /// INTO the gap, leaving the newly crossed milestone awardable.
+    /// The pre-migration row, driven through the handler so the fix is proved where it is wired rather
+    /// than only on the entity. Six completions before the gap and one after: repair reaches seven,
+    /// spends the banked freeze, and the newly crossed milestone must still be awardable. Rounding the
+    /// FULL repaired streak down recorded it as already granted, so its freeze was never issued.
     /// </summary>
     [Fact]
-    public void LegacyRowWithNoSnapshot_LeavesAPostGapMilestoneAwardable()
+    public async Task LegacyRowCrossingAMilestoneAfterTheGap_StillEarnsItsFreeze()
     {
-        _user.SetStreakState(6, 6, _today.AddDays(-2));
-        _user.PreGapFreezeAwardStreak.Should().BeNull();
+        _habit = SetHistory(_today, 1, precedingCompletions: 6);
+        _dateService.GetUserTodayAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(_today.AddDays(-1));
+        await _service.RecalculateAsync(_user.Id, awardFreezeIfEligible: false);
 
-        _user.RestoreStreakAfterGapRepair(7, 7, _today, _today.AddDays(-2), preGapStreak: 6);
+        _dateService.GetUserTodayAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(_today);
+        await _service.RecalculateAsync(_user.Id, awardFreezeIfEligible: false);
+        // The deployment boundary: rows written before the cursor migration carry no snapshot at all,
+        // and the freeze being spent was banked by an earlier run this fixture does not replay.
+        SetUserProperty(nameof(User.PreGapFreezeAwardStreak), null);
+        SetUserProperty(nameof(User.PreGapLastActiveDate), null);
+        SetUserProperty(nameof(User.StreakFreezesAccumulated), 1);
 
-        _user.LastFreezeAwardStreak.Should().Be(0);
+        // The completion AFTER the gap. It is what carries the repaired run across seven days, and so
+        // what the old fallback quietly recorded as an already-granted milestone.
+        _habit.Log(_today, advanceDueDate: false);
+
+        var (handler, _) = BuildRepairHandler();
+        var result = await handler.Handle(new(_user.Id, [_today.AddDays(-1)]), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        _user.LastFreezeAwardStreak.Should().BeLessThan(7);
         _user.AwardStreakFreezeIfEligible().Should().BeTrue();
-        _user.StreakFreezesAccumulated.Should().Be(1);
     }
 
     [Fact]
@@ -483,6 +484,41 @@ public class StreakGapRepairTests
         _logs.FindAsync(Arg.Any<Expression<Func<HabitLog, bool>>>(), Arg.Any<CancellationToken>())
             .Returns(call => habit.Logs.Where(call.Arg<Expression<Func<HabitLog, bool>>>().Compile()).ToList());
         return habit;
+    }
+
+    /// <summary>
+    /// Sets a persisted-only property the domain does not expose a setter for, the same reflection this
+    /// fixture already uses for <see cref="Habit.CreatedAtUtc"/>. Used to stage state an earlier run
+    /// would have produced, rather than adding test-only methods to the entity.
+    /// </summary>
+    private void SetUserProperty(string name, object? value) =>
+        typeof(User).GetProperty(name)!.SetValue(_user, value);
+
+    /// <summary>
+    /// The repair handler wired to this fixture's substitutes, with the staged freezes it will persist.
+    /// </summary>
+    private (RepairStreakGapCommandHandler Handler, List<StreakFreeze> Staged) BuildRepairHandler()
+    {
+        var staged = new List<StreakFreeze>();
+        _freezes.AddAsync(Arg.Any<StreakFreeze>(), Arg.Any<CancellationToken>())
+            .Returns(call => { staged.Add(call.Arg<StreakFreeze>()); return Task.CompletedTask; });
+        var unitOfWork = Substitute.For<IUnitOfWork>();
+        unitOfWork.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(_ =>
+        {
+            _persistedFreezes.AddRange(staged);
+            return Task.FromResult(3);
+        });
+        var flags = Substitute.For<IFeatureFlagService>();
+        flags.GetEnabledKeysForUserAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(Array.Empty<string>());
+        _users.GetByIdAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(_user);
+        var queryHandler = new GetStreakInfoQueryHandler(_users, _freezes, _dateService, _service,
+            flags, Substitute.For<IProductAnalytics>(), NullLogger<GetStreakInfoQueryHandler>.Instance);
+        var sender = Substitute.For<ISender>();
+        sender.Send(Arg.Any<GetStreakInfoQuery>(), Arg.Any<CancellationToken>())
+            .Returns(call => queryHandler.Handle(call.Arg<GetStreakInfoQuery>(), call.Arg<CancellationToken>()));
+        var handler = new RepairStreakGapCommandHandler(_users, _freezes, _dateService, _service,
+            flags, unitOfWork, sender, NullLogger<RepairStreakGapCommandHandler>.Instance);
+        return (handler, staged);
     }
 
     private Habit SetHistory(DateOnly today, int gapLength, int frequencyQuantity = 1, int precedingCompletions = 3)
