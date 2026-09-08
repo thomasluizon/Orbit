@@ -11,4 +11,4 @@ namespace Orbit.Domain.Models;
 /// was earned BEFORE the gap when no saved snapshot matches. Set only by gap repair.
 /// </param>
 public record UserStreakState(int CurrentStreak, int LongestStreak, DateOnly? LastActiveDate,
-    DateOnly? PrecedingScheduledDate = null, int PreGapStreak = 0);
+    DateOnly? PrecedingScheduledDate = null, int? PreGapStreak = null);

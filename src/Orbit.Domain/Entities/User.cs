@@ -600,11 +600,25 @@ public partial class User : Entity
     /// </param>
     public void RestoreStreakAfterGapRepair(
         int currentStreak, int longestStreak, DateOnly? lastActiveDate, DateOnly precedingDate,
-        int preGapStreak)
+        int? preGapStreak)
     {
-        var awardCursor = PreGapLastActiveDate == precedingDate && PreGapFreezeAwardStreak.HasValue
+        // The snapshot survives later recalculations on purpose, so it can describe a LONGER run than
+        // the one being repaired: unlogging an older pre-gap completion shortens the run while a cursor
+        // of 14 still matches on date. Taken alone it would suppress the 7 and 14 awards the shorter
+        // run has now re-earned, so the saved value is capped by what the current pre-gap run supports.
+        // NULLABLE on purpose. A caller that cannot say what the run into the gap was must not be read
+        // as saying it was ZERO: that silently collapses the cursor to 0 and re-grants every milestone
+        // the user already had. Unknown therefore means "do not bound", which is the behaviour that
+        // stood before the bound existed.
+        var earnedBeforeTheGap = GetEligibleFreezeAwardStreak(
+            preGapStreak.HasValue ? Math.Min(preGapStreak.Value, currentStreak) : currentStreak,
+            DefaultStreakDaysPerFreeze);
+        var savedCursor = PreGapLastActiveDate == precedingDate && PreGapFreezeAwardStreak.HasValue
             ? PreGapFreezeAwardStreak.Value
-            : GetEligibleFreezeAwardStreak(Math.Min(preGapStreak, currentStreak), DefaultStreakDaysPerFreeze);
+            : (int?)null;
+        var awardCursor = savedCursor.HasValue
+            ? (preGapStreak.HasValue ? Math.Min(savedCursor.Value, earnedBeforeTheGap) : savedCursor.Value)
+            : earnedBeforeTheGap;
         SetStreakState(currentStreak, longestStreak, lastActiveDate);
         LastFreezeAwardStreak = awardCursor;
         PreGapFreezeAwardStreak = null;

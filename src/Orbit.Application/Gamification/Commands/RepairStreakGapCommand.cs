@@ -57,6 +57,13 @@ public class RepairStreakGapCommandHandler(
         user.RestoreStreakAfterGapRepair(state.CurrentStreak, state.LongestStreak, state.LastActiveDate,
             state.PrecedingScheduledDate ?? gap.Value[0].UsedOnDate.AddDays(-1),
             state.PreGapStreak);
+        // Restoring the cursor only makes a newly crossed milestone ELIGIBLE. Nothing else in this path
+        // grants it: the response comes from GetStreakInfoQuery, which calls CalculateAsync rather than
+        // RecalculateAsync, so an award earned by the repaired run would sit pending and be lost the
+        // next time the streak reset. The repair grants it here, in the same save that spends the bank.
+        user.AwardStreakFreezeIfEligible(
+            AppConstants.MaxStreakFreezesAccumulated,
+            AppConstants.StreakDaysPerFreeze);
         foreach (var freeze in gap.Value)
             await streakFreezeRepository.AddAsync(freeze, cancellationToken);
 

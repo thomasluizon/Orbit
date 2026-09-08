@@ -361,8 +361,30 @@ public class StreakGapRepairTests
         var result = await handler.Handle(new(_user.Id, [_today.AddDays(-1)]), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
-        _user.LastFreezeAwardStreak.Should().BeLessThan(7);
-        _user.AwardStreakFreezeIfEligible().Should().BeTrue();
+        // GRANTED by the repair itself, not merely left eligible. The response comes from
+        // GetStreakInfoQuery, which calls CalculateAsync rather than RecalculateAsync, so an award only
+        // made eligible here would sit pending and be lost the next time the streak reset.
+        _user.StreakFreezesAccumulated.Should().Be(1);
+        _user.LastFreezeAwardStreak.Should().Be(7);
+    }
+
+    /// <summary>
+    /// The saved snapshot outlives later recalculations by design, so it can describe a LONGER run than
+    /// the one being repaired. Unlogging an older pre-gap completion shortens the run while a cursor of
+    /// 14 still matches on date; taken alone that suppressed the awards the shorter run has re-earned.
+    /// </summary>
+    [Fact]
+    public void SavedCursorLongerThanTheCurrentRun_IsCappedByWhatWasActuallyEarned()
+    {
+        _user.SetStreakState(14, 14, _today.AddDays(-2));
+        _user.AwardStreakFreezeIfEligible();
+        _user.LastFreezeAwardStreak.Should().Be(14);
+        _user.SetStreakState(0, 14, null);
+
+        // The same predecessor date the snapshot holds, but the run going into it is now only 7 long.
+        _user.RestoreStreakAfterGapRepair(7, 14, _today, _today.AddDays(-2), preGapStreak: 7);
+
+        _user.LastFreezeAwardStreak.Should().Be(7);
     }
 
     [Fact]
