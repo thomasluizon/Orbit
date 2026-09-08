@@ -96,26 +96,32 @@ public class UserStreakService(
         if (user is null)
             return null;
 
-        // Eligibility needs ONE occurrence before the gap, and on a yearly cadence that predecessor sits
-        // 366 days before the gap. Loading only MaxStreakLookbackDays put it outside the window, so a
-        // yearly or every-365-day gap always read as index 0 and was refused. The window is widened by
-        // exactly the longest supported cadence span, so it stays bounded rather than unbounded.
-        var lookbackStart = userToday.AddDays(-(AppConstants.MaxStreakLookbackDays + AppConstants.MaxScheduleSpanDays));
-        // The gap ITSELF is still confined to the ordinary streak window; only its predecessor may sit
-        // in the widened margin.
+        // TWO windows, deliberately. The streak itself is defined over the ordinary lookback, but
+        // eligibility needs ONE occurrence before the gap and on a yearly cadence that predecessor sits
+        // 366 days earlier, outside it. Completions and freezes are loaded across the wider span; the
+        // SCHEDULE is not, because GetStreakScheduledDates caps a generated range at 366 days, so one
+        // widened request silently truncated the RECENT end and lost the gap itself.
+        var lookbackStart = userToday.AddDays(-AppConstants.MaxStreakLookbackDays);
+        var predecessorStart = lookbackStart.AddDays(-AppConstants.MaxScheduleSpanDays);
+        // The gap ITSELF stays inside the ordinary streak window; only its predecessor may sit earlier.
         var gapStart = dates.Min();
-        if (gapStart <= userToday.AddDays(-AppConstants.MaxStreakLookbackDays))
+        if (gapStart <= lookbackStart)
             return null;
 
         var (completions, freezes, eligibleHabits) =
-            await LoadStreakDataAsync(userId, lookbackStart, cancellationToken);
+            await LoadStreakDataAsync(userId, predecessorStart, cancellationToken);
         var contributingHabits = GetContributingHabits(eligibleHabits);
         if (!contributingHabits.Any(habit => habit.FrequencyUnit is not null))
             return null;
 
+        // TWO bounded queries, then their union. GetStreakScheduledDates caps a generated range at
+        // MaxRangeDays, so ONE request spanning both windows silently truncated the RECENT end and lost
+        // the gap itself. Two requests, each inside the cap, lose nothing at either end.
+        var timeZone = TimeZoneHelper.FindTimeZone(user.TimeZone, userId: user.Id);
         var expectedDates = HabitScheduleService.GetUnionScheduledDatesForStreak(
-            contributingHabits, lookbackStart, userToday,
-            TimeZoneHelper.FindTimeZone(user.TimeZone, userId: user.Id), user.WeekStartDay);
+            contributingHabits, lookbackStart, userToday, timeZone, user.WeekStartDay);
+        expectedDates.UnionWith(HabitScheduleService.GetUnionScheduledDatesForStreak(
+            contributingHabits, predecessorStart, lookbackStart, timeZone, user.WeekStartDay));
         if (dates.Any(date => !expectedDates.Contains(date) || completions.Contains(date) || freezes.Contains(date)))
             return null;
 
@@ -125,7 +131,7 @@ public class UserStreakService(
         // usually not scheduled and so carries neither a completion nor a freeze.
         var scheduled = expectedDates.Order().ToArray();
         var gapStartIndex = Array.IndexOf(scheduled, gapStart);
-        if (gapStartIndex <= 0)
+        if (gapStartIndex < 0)
             return null;
 
         // The selection must be an unbroken run of scheduled occurrences, so a caller cannot omit a
@@ -137,6 +143,8 @@ public class UserStreakService(
             return null;
         }
 
+        if (gapStartIndex == 0)
+            return null;
         var precedingDate = scheduled[gapStartIndex - 1];
         if (!completions.Contains(precedingDate) && !freezes.Contains(precedingDate))
             return null;
@@ -149,11 +157,11 @@ public class UserStreakService(
         }
 
         var (currentStreak, _) = HabitScheduleService.ComputeStreakAsOf(
-            expectedDates, completions, freezes, lookbackStart, userToday);
+            expectedDates, completions, freezes, predecessorStart, userToday);
         var repairedDates = new HashSet<DateOnly>(freezes);
         repairedDates.UnionWith(dates);
         var (repairedStreak, lastActiveDate) = HabitScheduleService.ComputeStreakAsOf(
-            expectedDates, completions, repairedDates, lookbackStart, userToday);
+            expectedDates, completions, repairedDates, predecessorStart, userToday);
         if (repairedStreak <= currentStreak)
             return null;
 

@@ -293,6 +293,23 @@ public class StreakGapRepairTests
         state!.PrecedingScheduledDate.Should().Be(_today.AddDays(-1).AddYears(-1));
     }
 
+    /// <summary>
+    /// A habit older than the widened start. The schedule generator caps a requested range at 366 days,
+    /// so asking for the whole widened span in one call truncated the RECENT end: the gap ending
+    /// yesterday fell outside the generated dates and a valid repair reported unavailable. The recent
+    /// window and the predecessor are now fetched as two bounded queries.
+    /// </summary>
+    [Fact]
+    public async Task DailyHabitOlderThanTheWidenedStart_StillRepairsAGapEndingYesterday()
+    {
+        _habit = SetLongRunningDailyHistory();
+
+        var state = await _service.EvaluateGapRepairAsync(_user.Id, _today, [_today.AddDays(-1)]);
+
+        state.Should().NotBeNull();
+        state!.PrecedingScheduledDate.Should().Be(_today.AddDays(-2));
+    }
+
     /// <summary>The predecessor must reach the caller, because the award cursor is restored against it
     /// and a sparse gap's predecessor is never the previous calendar day.</summary>
     [Fact]
@@ -401,6 +418,26 @@ public class StreakGapRepairTests
         typeof(Habit).GetProperty(nameof(Habit.CreatedAtUtc))!.SetValue(habit,
             firstOccurrence.ToDateTime(new TimeOnly(12, 0), DateTimeKind.Utc));
         habit.Log(firstOccurrence, advanceDueDate: false);
+        _habits.FindAsync(Arg.Any<Expression<Func<Habit, bool>>>(), Arg.Any<CancellationToken>()).Returns([habit]);
+        _logs.FindAsync(Arg.Any<Expression<Func<HabitLog, bool>>>(), Arg.Any<CancellationToken>())
+            .Returns(call => habit.Logs.Where(call.Arg<Expression<Func<HabitLog, bool>>>().Compile()).ToList());
+        return habit;
+    }
+
+    /// <summary>
+    /// A daily habit created 800 days ago, which is older than the widened predecessor start, so its
+    /// effectiveFrom sits at that boundary and the generator's 366-day cap decides where generation
+    /// stops. Completions run up to the day before the gap.
+    /// </summary>
+    private Habit SetLongRunningDailyHistory()
+    {
+        var createdOn = _today.AddDays(-800);
+        var habit = Habit.Create(new HabitCreateParams(_user.Id, "Daily", FrequencyUnit.Day, 1,
+            DueDate: createdOn)).Value;
+        typeof(Habit).GetProperty(nameof(Habit.CreatedAtUtc))!.SetValue(habit,
+            createdOn.ToDateTime(new TimeOnly(12, 0), DateTimeKind.Utc));
+        for (var offset = 0; offset < 799; offset++)
+            habit.Log(createdOn.AddDays(offset), advanceDueDate: false);
         _habits.FindAsync(Arg.Any<Expression<Func<Habit, bool>>>(), Arg.Any<CancellationToken>()).Returns([habit]);
         _logs.FindAsync(Arg.Any<Expression<Func<HabitLog, bool>>>(), Arg.Any<CancellationToken>())
             .Returns(call => habit.Logs.Where(call.Arg<Expression<Func<HabitLog, bool>>>().Compile()).ToList());
