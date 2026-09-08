@@ -94,7 +94,6 @@ public class StreakGapTests
     }
 
     [Theory]
-    [InlineData(-3, -1)]
     [InlineData(-1, -1)]
     [InlineData(-3, -2)]
     [InlineData(-1, 0)]
@@ -104,6 +103,20 @@ public class StreakGapTests
         var result = StreakFreeze.CreateGap(Guid.NewGuid(), [Today.AddDays(first), Today.AddDays(last)], Today);
 
         result.ErrorCode.Should().Be(DomainErrors.InvalidStreakGap.Code);
+    }
+
+    /// <summary>
+    /// A calendar-sparse selection is well formed HERE. Contiguity is defined over the user's scheduled
+    /// occurrences, which this entity cannot see, so asserting calendar adjacency rejected every valid
+    /// weekly and yearly gap before a schedule was ever loaded. UserStreakService refuses a selection
+    /// that is not an unbroken run of scheduled occurrences.
+    /// </summary>
+    [Fact]
+    public void CreateGap_CalendarSparseSelectionEndingYesterday_IsAccepted()
+    {
+        var result = StreakFreeze.CreateGap(Guid.NewGuid(), [Today.AddDays(-3), Today.AddDays(-1)], Today);
+
+        result.IsSuccess.Should().BeTrue();
     }
 
     [Fact]

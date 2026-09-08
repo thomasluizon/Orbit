@@ -17,13 +17,23 @@ public class RepairStreakGapCommandValidatorTests
             .ShouldNotHaveAnyValidationErrors();
     }
 
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-2)]
-    public void DuplicatesOrNonContiguousDates_AreInvalid(int offset)
+    [Fact]
+    public void DuplicateDates_AreInvalid()
     {
-        _validator.TestValidate(new RepairStreakGapCommand(Guid.NewGuid(), [Yesterday, Yesterday.AddDays(offset)]))
+        _validator.TestValidate(new RepairStreakGapCommand(Guid.NewGuid(), [Yesterday, Yesterday]))
             .ShouldHaveValidationErrorFor(command => command.Dates);
+    }
+
+    /// <summary>
+    /// Calendar sparseness is NOT a request-boundary error. A weekly gap's dates are seven days apart,
+    /// and rejecting them here made those gaps unrepairable before the schedule was consulted.
+    /// UserStreakService decides contiguity against the real scheduled occurrences.
+    /// </summary>
+    [Fact]
+    public void CalendarSparseDates_AreValidHere()
+    {
+        _validator.TestValidate(new RepairStreakGapCommand(Guid.NewGuid(), [Yesterday, Yesterday.AddDays(-7)]))
+            .ShouldNotHaveAnyValidationErrors();
     }
 
     [Fact]

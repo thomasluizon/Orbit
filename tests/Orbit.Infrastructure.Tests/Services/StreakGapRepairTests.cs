@@ -277,6 +277,35 @@ public class StreakGapRepairTests
         (await _service.EvaluateGapRepairAsync(_user.Id, _today, [_today.AddDays(-1)])).Should().BeNull();
     }
 
+    /// <summary>
+    /// The history-boundary case. A yearly occurrence on yesterday has its predecessor 366 days before
+    /// the gap, which fell outside the 365-day window, so the gap read as index 0 and was always
+    /// refused. The window is widened by exactly one cadence span so the predecessor is loadable.
+    /// </summary>
+    [Fact]
+    public async Task YearlyGapWhosePredecessorSitsBeyondTheStreakWindow_IsRepairable()
+    {
+        _habit = SetYearlyHistory();
+
+        var state = await _service.EvaluateGapRepairAsync(_user.Id, _today, [_today.AddDays(-1)]);
+
+        state.Should().NotBeNull();
+        state!.PrecedingScheduledDate.Should().Be(_today.AddDays(-1).AddYears(-1));
+    }
+
+    /// <summary>The predecessor must reach the caller, because the award cursor is restored against it
+    /// and a sparse gap's predecessor is never the previous calendar day.</summary>
+    [Fact]
+    public async Task RepairCarriesTheScheduledPredecessorForCursorRestoration()
+    {
+        _habit = SetWeeklyHistory();
+
+        var state = await _service.EvaluateGapRepairAsync(_user.Id, _today, [_today.AddDays(-1)]);
+
+        state!.PrecedingScheduledDate.Should().Be(_today.AddDays(-8));
+        state.PrecedingScheduledDate.Should().NotBe(_today.AddDays(-2));
+    }
+
     [Fact]
     public async Task GapExceedsMonthlyAllowance_IsUnavailable()
     {
@@ -353,6 +382,25 @@ public class StreakGapRepairTests
                 continue;
             habit.Log(firstOccurrence.AddDays(7 * week), advanceDueDate: false);
         }
+        _habits.FindAsync(Arg.Any<Expression<Func<Habit, bool>>>(), Arg.Any<CancellationToken>()).Returns([habit]);
+        _logs.FindAsync(Arg.Any<Expression<Func<HabitLog, bool>>>(), Arg.Any<CancellationToken>())
+            .Returns(call => habit.Logs.Where(call.Arg<Expression<Func<HabitLog, bool>>>().Compile()).ToList());
+        return habit;
+    }
+
+    /// <summary>
+    /// A yearly habit occurring on yesterday and on the same day a year earlier, the earlier one
+    /// completed. Its predecessor is 366 days before the gap, which is the boundary the 365-day
+    /// history window used to cut off.
+    /// </summary>
+    private Habit SetYearlyHistory()
+    {
+        var firstOccurrence = _today.AddDays(-1).AddYears(-1);
+        var habit = Habit.Create(new HabitCreateParams(_user.Id, "Annual review", FrequencyUnit.Year, 1,
+            DueDate: firstOccurrence)).Value;
+        typeof(Habit).GetProperty(nameof(Habit.CreatedAtUtc))!.SetValue(habit,
+            firstOccurrence.ToDateTime(new TimeOnly(12, 0), DateTimeKind.Utc));
+        habit.Log(firstOccurrence, advanceDueDate: false);
         _habits.FindAsync(Arg.Any<Expression<Func<Habit, bool>>>(), Arg.Any<CancellationToken>()).Returns([habit]);
         _logs.FindAsync(Arg.Any<Expression<Func<HabitLog, bool>>>(), Arg.Any<CancellationToken>())
             .Returns(call => habit.Logs.Where(call.Arg<Expression<Func<HabitLog, bool>>>().Compile()).ToList());

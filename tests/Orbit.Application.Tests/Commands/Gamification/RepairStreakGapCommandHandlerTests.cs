@@ -105,13 +105,19 @@ public class RepairStreakGapCommandHandlerTests
         await AssertNoWrites();
     }
 
+    /// <summary>
+    /// Still refused, still without spending a freeze. The error code moved because the refusal moved:
+    /// a calendar-sparse selection is well formed until the SCHEDULE is known, so it is now the
+    /// schedule-aware evaluation that declines it rather than the domain factory. That relocation is
+    /// what makes a genuine weekly or yearly gap repairable at all.
+    /// </summary>
     [Fact]
-    public async Task NonContiguousSelection_RefusesWithoutSpending()
+    public async Task CalendarSparseSelectionWithNoMatchingSchedule_RefusesWithoutSpending()
     {
         Bank(2);
         var result = await _handler.Handle(new(_user.Id, [Today.AddDays(-3), Today.AddDays(-1)]), CancellationToken.None);
 
-        result.ErrorCode.Should().Be(DomainErrors.InvalidStreakGap.Code);
+        result.ErrorCode.Should().Be(ErrorCodes.StreakGapRepairUnavailable);
         _user.StreakFreezesAccumulated.Should().Be(2);
         await AssertNoWrites();
     }

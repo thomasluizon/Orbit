@@ -96,9 +96,15 @@ public class UserStreakService(
         if (user is null)
             return null;
 
-        var lookbackStart = userToday.AddDays(-AppConstants.MaxStreakLookbackDays);
+        // Eligibility needs ONE occurrence before the gap, and on a yearly cadence that predecessor sits
+        // 366 days before the gap. Loading only MaxStreakLookbackDays put it outside the window, so a
+        // yearly or every-365-day gap always read as index 0 and was refused. The window is widened by
+        // exactly the longest supported cadence span, so it stays bounded rather than unbounded.
+        var lookbackStart = userToday.AddDays(-(AppConstants.MaxStreakLookbackDays + AppConstants.MaxScheduleSpanDays));
+        // The gap ITSELF is still confined to the ordinary streak window; only its predecessor may sit
+        // in the widened margin.
         var gapStart = dates.Min();
-        if (gapStart <= lookbackStart)
+        if (gapStart <= userToday.AddDays(-AppConstants.MaxStreakLookbackDays))
             return null;
 
         var (completions, freezes, eligibleHabits) =
@@ -151,9 +157,11 @@ public class UserStreakService(
         if (repairedStreak <= currentStreak)
             return null;
 
+        // The predecessor travels WITH the state. The handler restores the award cursor against it, and
+        // deriving it there as `gapStart - 1` was the same calendar-versus-schedule mistake one layer up.
         return new UserStreakState(repairedStreak,
             Math.Max(user.LongestStreak, ComputeLongestStreak(expectedDates, completions, repairedDates)),
-            lastActiveDate);
+            lastActiveDate, precedingDate);
     }
 
     internal static StreakRepairEvaluation EvaluateRepair(
