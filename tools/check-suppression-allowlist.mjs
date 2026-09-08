@@ -107,8 +107,14 @@ const csharpFiles = (directory, found = []) => {
  * the broadest suppression the language offers. An earlier version of this regex required at least one
  * id and therefore walked straight past it. It now matches the bare form and reports it under the
  * synthetic id below, so it fails as an undeclared suppression like anything else.
+ *
+ * Whitespace is legal after the `#`, so `# pragma warning disable` is the same directive. That was a
+ * second bypass, verified against a real `net10.0` build with `TreatWarningsAsErrors=true`: the spaced
+ * form suppressed the diagnostic while this checker reported zero sites and exited 0. Hence
+ * `#[^\S\n]*pragma` rather than `#pragma`, and the internal gaps are whitespace classes for the same
+ * reason.
  */
-const PRAGMA = /^[^\S\n]*#pragma\s+warning\s+disable\b([^\r\n/]*)/gm
+const PRAGMA = /^[^\S\n]*#[^\S\n]*pragma[^\S\n]+warning[^\S\n]+disable\b([^\r\n/]*)/gm
 /**
  * The id a bare `#pragma warning disable` is counted under. It is deliberately not a legal C# rule id,
  * so no allowlist entry can ever declare it and the gate always refuses: disabling every warning at
@@ -116,14 +122,27 @@ const PRAGMA = /^[^\S\n]*#pragma\s+warning\s+disable\b([^\r\n/]*)/gm
  */
 const ALL_WARNINGS = "(all warnings)"
 /**
- * `[SuppressMessage("Major Code Smell", "S107:Methods should not have too many parameters", ...)]`.
- * The rule id is the second argument up to its colon or its closing quote, confirmed against all seven
- * live attributes.
+ * DETECTION and EXTRACTION are separate, and that separation is the whole design.
  *
- * `Attribute` is optional in C# attribute syntax, so `[SuppressMessageAttribute(...)]` is the same
- * attribute and an earlier version of this pattern missed it.
+ * Canonical-form matching cannot establish a closed set: any form the extractor fails to recognise
+ * reads as "no suppression here" and passes. So the broad pattern below finds every use of the
+ * attribute, the strict pattern extracts the rule id from the ones it can prove, and anything found
+ * but not extractable FAILS CLOSED with the file named. A form this tool cannot inventory is a form it
+ * refuses, never one it ignores.
+ *
+ * `[SuppressMessage("Major Code Smell", "S107:Methods should not have too many parameters", ...)]` is
+ * the shape all seven live attributes take. `Attribute` is optional in C# attribute syntax, so
+ * `[SuppressMessageAttribute(...)]` is the same attribute.
  */
-const SUPPRESS_MESSAGE = /SuppressMessage(?:Attribute)?\s*\(\s*"[^"]*"\s*,\s*"([A-Za-z]+\d+)[:"]/g
+const SUPPRESS_MESSAGE_ANY = /\bSuppressMessage(?:Attribute)?\s*\(/g
+const SUPPRESS_MESSAGE = /\bSuppressMessage(?:Attribute)?\s*\(\s*"[^"]*"\s*,\s*"([A-Za-z]+\d+)[:"]/g
+/**
+ * A `using` alias can rename the attribute to anything, and no regex can resolve an arbitrary alias to
+ * the attribute it names. So the alias DECLARATION is what gets caught: a file that declares one cannot
+ * be inventoried reliably, and it is refused rather than scanned. Same for a check id that is not a
+ * string literal, which the strict pattern above cannot read.
+ */
+const SUPPRESS_MESSAGE_ALIAS = /^[^\S\n]*using\s+[A-Za-z_]\w*\s*=\s*[\w.]*SuppressMessage(?:Attribute)?\s*;/gm
 
 const pragmaRules = (match) => {
   const ids = match[1]
@@ -204,12 +223,25 @@ const generatedRules = new Map(
   allowlist.generatedDirectories.map((entry) => [`${entry.path.replace(/\/+$/, "")}/`, new Set(Array.isArray(entry.rules) ? entry.rules : [])]),
 )
 const undeclaredInGenerated = []
+/** Forms found but not inventoriable. The gate refuses these rather than reporting zero sites. */
+const uninventoriable = []
 
 for (const absolute of csharpFiles(sourceRoot)) {
   const path = toPosix(absolute)
   const body = readFileSync(absolute, "utf8")
   const pragmas = countsOf(body, PRAGMA, pragmaRules)
   const attributes = countsOf(body, SUPPRESS_MESSAGE, (match) => [match[1]])
+
+  for (const _alias of body.matchAll(SUPPRESS_MESSAGE_ALIAS)) {
+    uninventoriable.push(`${path} declares a using alias for SuppressMessage. This gate cannot resolve an alias to the attribute it names, so it refuses the file rather than reporting zero sites. Use the attribute's own name.`)
+  }
+  const found = [...body.matchAll(SUPPRESS_MESSAGE_ANY)].length
+  const extracted = [...attributes.values()].reduce((total, count) => total + count, 0)
+  if (found > extracted) {
+    uninventoriable.push(
+      `${path} uses SuppressMessage ${found} time(s) and only ${extracted} carried a readable check id. An id that is not a string literal cannot be inventoried, so it is refused rather than skipped.`,
+    )
+  }
   const generatedPrefix = [...generatedRules.keys()].find((prefix) => path.startsWith(prefix))
   if (generatedPrefix) {
     const permitted = generatedRules.get(generatedPrefix)
@@ -231,7 +263,7 @@ if (printOnly) {
   process.exit(0)
 }
 
-const problems = [...undeclaredInGenerated]
+const problems = [...uninventoriable, ...undeclaredInGenerated]
 let declaredSites = 0
 
 for (const kind of ["pragmas", "suppressMessage"]) {

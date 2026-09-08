@@ -281,6 +281,83 @@ test("a generated directory exempts only the rules it declares, so its rules lis
   assert.match(result.stderr, /suppresses ORBIT0004, which src\/Orbit\.Infrastructure\/Migrations\/ does not declare as generated/)
 })
 
+/**
+ * The second review round. Canonical-form matching cannot establish a closed set: a form the extractor
+ * does not recognise reads as "no suppression here" and passes. Detection and extraction are separate
+ * now, and anything found but not inventoriable is REFUSED rather than skipped.
+ *
+ * The spaced directive was verified against a real `net10.0` build with `TreatWarningsAsErrors=true`:
+ * it suppressed the diagnostic while the old pattern reported zero sites and exited 0.
+ */
+test("whitespace after the # is a legal directive and is caught", () => {
+  const result = run(
+    stage("spaced-pragma", {
+      pragmas: DECLARED_AUTH_SESSION,
+      sources: {
+        "src/Orbit.Infrastructure/Services/AuthSessionService.cs": ["#pragma warning disable ORBIT0004", "#pragma warning restore ORBIT0004", ""].join("\n"),
+        "src/Orbit.Application/Spaced/SpacedCommand.cs": ["#  pragma   warning   disable   ORBIT0004", "var nowUtc = DateTime.UtcNow;", "#pragma warning restore ORBIT0004", ""].join("\n"),
+      },
+    }),
+  )
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /SpacedCommand\.cs carries #pragma warning disable for ORBIT0004/)
+})
+
+test("a spaced BARE directive is caught too, under the all-warnings id", () => {
+  const result = run(
+    stage("spaced-bare-pragma", {
+      pragmas: DECLARED_AUTH_SESSION,
+      sources: {
+        "src/Orbit.Infrastructure/Services/AuthSessionService.cs": ["#pragma warning disable ORBIT0004", "#pragma warning restore ORBIT0004", ""].join("\n"),
+        "src/Orbit.Application/Spaced/BareCommand.cs": ["# pragma warning disable", "#pragma warning restore", ""].join("\n"),
+      },
+    }),
+  )
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /BareCommand\.cs carries #pragma warning disable for \(all warnings\)/)
+})
+
+test("a SuppressMessage whose check id is not a literal is REFUSED, not skipped", () => {
+  const result = run(
+    stage("non-literal-id", {
+      pragmas: DECLARED_AUTH_SESSION,
+      sources: {
+        "src/Orbit.Infrastructure/Services/AuthSessionService.cs": ["#pragma warning disable ORBIT0004", "#pragma warning restore ORBIT0004", ""].join("\n"),
+        "src/Orbit.Api/Mcp/Tools/ConstTools.cs": [
+          "const string Category = \"Major Code Smell\";",
+          "const string Rule = \"S107:Methods should not have too many parameters\";",
+          "[System.Diagnostics.CodeAnalysis.SuppressMessage(Category, Rule, Justification = \"MCP SDK\")]",
+          "public void Tool() { }",
+          "",
+        ].join("\n"),
+      },
+    }),
+  )
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /ConstTools\.cs uses SuppressMessage 1 time\(s\) and only 0 carried a readable check id/)
+  assert.match(result.stderr, /refused rather than skipped/)
+})
+
+test("a using alias for SuppressMessage is REFUSED, because no regex can resolve it", () => {
+  const result = run(
+    stage("attribute-alias", {
+      pragmas: DECLARED_AUTH_SESSION,
+      sources: {
+        "src/Orbit.Infrastructure/Services/AuthSessionService.cs": ["#pragma warning disable ORBIT0004", "#pragma warning restore ORBIT0004", ""].join("\n"),
+        "src/Orbit.Api/Mcp/Tools/AliasTools.cs": [
+          "using SM = System.Diagnostics.CodeAnalysis.SuppressMessageAttribute;",
+          '[SM("Major Code Smell", "S107:Methods should not have too many parameters")]',
+          "public void Tool() { }",
+          "",
+        ].join("\n"),
+      },
+    }),
+  )
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /AliasTools\.cs declares a using alias for SuppressMessage/)
+  assert.match(result.stderr, /Use the attribute's own name/)
+})
+
 test("an empty reason is a data error, so an entry cannot be filled in without writing one", () => {
   const result = run(stage("empty-reason", { pragmas: { "src/Orbit.Infrastructure/Services/AuthSessionService.cs": { ORBIT0004: { count: 1, reason: "   " } } } }))
   assert.equal(result.status, 2)
