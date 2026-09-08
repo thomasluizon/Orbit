@@ -1,0 +1,436 @@
+{
+  "generatedDirectories": [
+    {
+      "path": "src/Orbit.Infrastructure/Migrations",
+      "rules": [
+        "612",
+        "618"
+      ],
+      "reason": "EF Core emits `#pragma warning disable 612, 618` around BuildTargetModel in every migration designer, so these are generated code and not a decision anybody made. `Guard Migrations` already fails any pull request that edits an applied migration, which is the gate that matters for this directory. Declared here rather than skipped by a regex, so the exemption is data a reviewer reads in the diff."
+    }
+  ],
+  "ruleVerdicts": {
+    "ORBIT0001": {
+      "verdict": "keep the rule as it stands; no site is suppressed.",
+      "evidence": "NoCommentsAnalyzer ships at DiagnosticSeverity.Error and zero `#pragma warning disable ORBIT0001` exists under src/, read from the tree on 2026-09-08. A narration comment is either deleted or rewritten as an XML doc or a URL-linked WHY note, and `dotnet format` autofixes it. Nothing to narrow and nothing to clear."
+    },
+    "ORBIT0002": {
+      "verdict": "keep the rule as it stands; no site is suppressed.",
+      "evidence": "RollbackInUsingTransactionAnalyzer ships at Error and zero suppressions of it exist under src/. Its exemption logic already leaves a manually owned transaction alone, which is the case that would otherwise force a pragma."
+    },
+    "ORBIT0003": {
+      "verdict": "keep the rule as it stands; no site is suppressed.",
+      "evidence": "ControllerAuthorizationAnalyzer ships at Error and zero suppressions of it exist under src/. The sanctioned escape is `[AllowAnonymous]` on the controller, which is a visible attribute rather than a pragma, so the rule already has an in-language exemption and needs no allowlist entry."
+    },
+    "ORBIT0004": {
+      "verdict": "NARROW IT, and #230 executes the narrowing. Provisional, and deliberately not acted on here.",
+      "evidence": "This carries 47 of the 94 hand-written pragma sites under src/, in 27 files, and orbit-api#431's classification is 38 instants and 14 buckets. Every one of those is an expiry, TTL, cutoff, audit stamp or aggregation key, which is what the analyzer is supposed to permit. The analyzer's exemption logic is LINE-level: it excuses a `DateTime.UtcNow` read when the source line names an `*AtUtc` symbol or a cache key, or when the value feeds a TimeZoneInfo conversion. A site that assigns to a local called `nowUtc` and passes it to a domain method taking an `*AtUtc` parameter does not match that line, and fires. `AuthSessionService.cs:33-35` (`var nowUtc = DateTime.UtcNow;`) is exactly that shape and carries five of the sites. If dataflow into an `*AtUtc` parameter were recognised, a large share of the 47 would stop firing and their pragmas would be deleted rather than re-justified. NOT executed here: this ticket declares the sites as they are, and narrowing an analyzer silently changes what 47 sites mean before anyone has read them. #230 confirms this against the analyzer source and an analyzer-enabled build, then narrows or refutes it."
+    },
+    "ORBIT0005": {
+      "verdict": "keep the rule as it stands; no site is suppressed.",
+      "evidence": "DbSetFluentConfigurationAnalyzer ships at Error and zero suppressions of it exist under src/. Every `DbSet<T>` carries its `modelBuilder.Entity<T>(...)` configuration, so the rule is satisfied rather than evaded."
+    }
+  },
+  "pragmas": {
+    "src/Orbit.Api/Authentication/ApiKeyAuthenticationHandler.cs": {
+      "S3267": {
+        "count": 1,
+        "reason": "BCrypt.Verify is expensive, so the early exit through foreach is deliberate rather than a LINQ simplification."
+      }
+    },
+    "src/Orbit.Api/Controllers/ApiKeysController.cs": {
+      "CA1873": {
+        "count": 1,
+        "reason": "a file-level disable in a file that uses [LoggerMessage] source generation, verified 2026-09-08: every one of the eleven CA1873 files contains at least one [LoggerMessage] declaration, and the analyzer flags the generated call sites. The reason is not site-specific, because the disable is not: #230 owns narrowing it."
+      }
+    },
+    "src/Orbit.Api/Controllers/AuthController.cs": {
+      "CA1873": {
+        "count": 1,
+        "reason": "a file-level disable in a file that uses [LoggerMessage] source generation, verified 2026-09-08: every one of the eleven CA1873 files contains at least one [LoggerMessage] declaration, and the analyzer flags the generated call sites. The reason is not site-specific, because the disable is not: #230 owns narrowing it."
+      }
+    },
+    "src/Orbit.Api/Controllers/ChecklistTemplatesController.cs": {
+      "CA1873": {
+        "count": 1,
+        "reason": "a file-level disable in a file that uses [LoggerMessage] source generation, verified 2026-09-08: every one of the eleven CA1873 files contains at least one [LoggerMessage] declaration, and the analyzer flags the generated call sites. The reason is not site-specific, because the disable is not: #230 owns narrowing it."
+      }
+    },
+    "src/Orbit.Api/Controllers/GoalsController.cs": {
+      "CA1873": {
+        "count": 1,
+        "reason": "a file-level disable in a file that uses [LoggerMessage] source generation, verified 2026-09-08: every one of the eleven CA1873 files contains at least one [LoggerMessage] declaration, and the analyzer flags the generated call sites. The reason is not site-specific, because the disable is not: #230 owns narrowing it."
+      }
+    },
+    "src/Orbit.Api/Controllers/HabitsController.cs": {
+      "CA1873": {
+        "count": 1,
+        "reason": "a file-level disable in a file that uses [LoggerMessage] source generation, verified 2026-09-08: every one of the eleven CA1873 files contains at least one [LoggerMessage] declaration, and the analyzer flags the generated call sites. The reason is not site-specific, because the disable is not: #230 owns narrowing it."
+      }
+    },
+    "src/Orbit.Api/Controllers/NotificationController.cs": {
+      "CA1873": {
+        "count": 1,
+        "reason": "a file-level disable in a file that uses [LoggerMessage] source generation, verified 2026-09-08: every one of the eleven CA1873 files contains at least one [LoggerMessage] declaration, and the analyzer flags the generated call sites. The reason is not site-specific, because the disable is not: #230 owns narrowing it."
+      }
+    },
+    "src/Orbit.Api/Controllers/OAuthController.cs": {
+      "S107": {
+        "count": 1,
+        "reason": "the OAuth controller legitimately requires many injected dependencies."
+      },
+      "S6931": {
+        "count": 1,
+        "reason": "the OAuth and MCP well-known URLs follow protocol-mandated paths with no common prefix, so a shared route prefix is not available."
+      },
+      "S6932": {
+        "count": 2,
+        "reason": "the raw Request.Body and Request.Headers are needed for signature verification: Play RTDN push, the Stripe webhook, and reverse-proxy X-Forwarded-Proto detection."
+      }
+    },
+    "src/Orbit.Api/Controllers/ProfileController.cs": {
+      "CA1873": {
+        "count": 1,
+        "reason": "a file-level disable in a file that uses [LoggerMessage] source generation, verified 2026-09-08: every one of the eleven CA1873 files contains at least one [LoggerMessage] declaration, and the analyzer flags the generated call sites. The reason is not site-specific, because the disable is not: #230 owns narrowing it."
+      }
+    },
+    "src/Orbit.Api/Controllers/SubscriptionController.cs": {
+      "S6932": {
+        "count": 2,
+        "reason": "the raw Request.Body and Request.Headers are needed for signature verification: Play RTDN push, the Stripe webhook, and reverse-proxy X-Forwarded-Proto detection."
+      }
+    },
+    "src/Orbit.Api/Controllers/SupportController.cs": {
+      "CA1873": {
+        "count": 1,
+        "reason": "a file-level disable in a file that uses [LoggerMessage] source generation, verified 2026-09-08: every one of the eleven CA1873 files contains at least one [LoggerMessage] declaration, and the analyzer flags the generated call sites. The reason is not site-specific, because the disable is not: #230 owns narrowing it."
+      }
+    },
+    "src/Orbit.Api/Controllers/SyncController.cs": {
+      "ORBIT0004": {
+        "count": 2,
+        "reason": "instant: the sync-window guard against `since`, and the ServerTimestamp field of the sync envelope. Both are wire-protocol UTC instants."
+      }
+    },
+    "src/Orbit.Api/Controllers/TagsController.cs": {
+      "CA1873": {
+        "count": 1,
+        "reason": "a file-level disable in a file that uses [LoggerMessage] source generation, verified 2026-09-08: every one of the eleven CA1873 files contains at least one [LoggerMessage] declaration, and the analyzer flags the generated call sites. The reason is not site-specific, because the disable is not: #230 owns narrowing it."
+      }
+    },
+    "src/Orbit.Api/Controllers/UserFactsController.cs": {
+      "CA1873": {
+        "count": 1,
+        "reason": "a file-level disable in a file that uses [LoggerMessage] source generation, verified 2026-09-08: every one of the eleven CA1873 files contains at least one [LoggerMessage] declaration, and the analyzer flags the generated call sites. The reason is not site-specific, because the disable is not: #230 owns narrowing it."
+      }
+    },
+    "src/Orbit.Api/Extensions/ServiceCollectionExtensions.Infrastructure.cs": {
+      "S1075": {
+        "count": 1,
+        "reason": "the Resend API base URL is a stable, well-known endpoint."
+      }
+    },
+    "src/Orbit.Api/OAuth/OAuthAuthorizationStore.cs": {
+      "ORBIT0004": {
+        "count": 3,
+        "reason": "instant: the OAuth authorization-code CreatedAt stamp, its expiry check, and the expired-entry sweep cutoff."
+      }
+    },
+    "src/Orbit.Api/RateLimiting/DistributedRateLimitAttribute.cs": {
+      "S107": {
+        "count": 1,
+        "reason": "an S107 false positive: [LoggerMessage] source generation binds each parameter to a named placeholder in the template, so folding them into a parameter object would drop the structured-log fields."
+      }
+    },
+    "src/Orbit.Application/Auth/Commands/SendCodeCommand.cs": {
+      "ORBIT0004": {
+        "count": 4,
+        "reason": "instant: the same VerificationEntry throttle and TTL instants for send-code, including the test-account and smoke-code paths."
+      }
+    },
+    "src/Orbit.Application/Behaviors/ValidationBehavior.cs": {
+      "CA2016": {
+        "count": 2,
+        "reason": "RequestHandlerDelegate<T> accepts no CancellationToken parameter, so it cannot be forwarded."
+      }
+    },
+    "src/Orbit.Application/Calendar/Commands/DismissCalendarSuggestionCommand.cs": {
+      "ORBIT0004": {
+        "count": 1,
+        "reason": "instant: the MarkDismissed(now) audit timestamp."
+      }
+    },
+    "src/Orbit.Application/Chat/Tools/Implementations/QueryHabitsTool.cs": {
+      "CA1859": {
+        "count": 2,
+        "reason": "IReadOnlyList<Habit> is deliberate: it matches the repository interface's return type."
+      }
+    },
+    "src/Orbit.Application/Habits/Commands/BulkCreateHabitsCommand.cs": {
+      "ORBIT0004": {
+        "count": 1,
+        "reason": "instant: the MarkImported(habitId, now) ImportedAtUtc audit timestamp for a calendar suggestion."
+      }
+    },
+    "src/Orbit.Application/Profile/Commands/SetHandleCommand.cs": {
+      "CA1862": {
+        "count": 1,
+        "reason": "EF Core cannot translate string.Equals(StringComparison) to SQL, so the case-insensitive match stays as ToLower(). dotnet/efcore#1222."
+      }
+    },
+    "src/Orbit.Application/Social/Services/FriendGraphService.cs": {
+      "CA1862": {
+        "count": 1,
+        "reason": "EF Core cannot translate string.Equals(StringComparison) to SQL, so the case-insensitive match stays as ToLower(). dotnet/efcore#1222."
+      }
+    },
+    "src/Orbit.Application/Waitlist/Commands/JoinWaitlistCommand.cs": {
+      "ORBIT0004": {
+        "count": 1,
+        "reason": "instant: the 60-second resend-throttle elapsed math against the cached last-sent instant."
+      }
+    },
+    "src/Orbit.Domain/Entities/Habit.cs": {
+      "S6964": {
+        "count": 1,
+        "reason": "a domain entity with private setters, not a model-bound DTO."
+      }
+    },
+    "src/Orbit.Domain/Entities/PendingClarification.cs": {
+      "CS0649": {
+        "count": 1,
+        "reason": "EF writes this backing field through reflection on materialization and at the SQL layer, so there is no C# writer and never-assigned is a false positive. orbit-api#390."
+      },
+      "S3459": {
+        "count": 1,
+        "reason": "the same field: EF writes it through reflection and at the SQL layer, so unassigned-field is a false positive. orbit-api#390."
+      }
+    },
+    "src/Orbit.Domain/Entities/Report.cs": {
+      "CS0649": {
+        "count": 1,
+        "reason": "EF writes this backing field through reflection on materialization and at the SQL layer, so there is no C# writer and never-assigned is a false positive. orbit-api#390."
+      },
+      "S3459": {
+        "count": 1,
+        "reason": "the same field: EF writes it through reflection and at the SQL layer, so unassigned-field is a false positive. orbit-api#390."
+      }
+    },
+    "src/Orbit.Infrastructure/AI/AiBatchClient.cs": {
+      "OPENAI001": {
+        "count": 1,
+        "reason": "the OpenAI Batch and Files surface is pre-release, which the class's own XML doc records; the suppression is scoped to the file that wraps it."
+      }
+    },
+    "src/Orbit.Infrastructure/AI/AiUsageRecorder.cs": {
+      "ORBIT0004": {
+        "count": 1,
+        "reason": "bucket: the UTC-day key for the AiUsageDaily cost-aggregation row."
+      }
+    },
+    "src/Orbit.Infrastructure/Persistence/OrbitDbContext.cs": {
+      "ORBIT0004": {
+        "count": 1,
+        "reason": "instant: UpdatedAtUtc stamping for every tracked ITimestamped entity in SaveChangesAsync."
+      }
+    },
+    "src/Orbit.Infrastructure/Services/AccountDeletionService.cs": {
+      "ORBIT0004": {
+        "count": 3,
+        "reason": "two instants and one bucket: the scheduled-deletion due check, the ProcessedRequest retention cutoff, and the 90-day UTC-date purge cutoff."
+      }
+    },
+    "src/Orbit.Infrastructure/Services/AgentCatalogService.Capabilities.cs": {
+      "CA1861": {
+        "count": 1,
+        "reason": "the static catalog schemas are evaluated once at startup and are not hot-path allocations."
+      },
+      "S107": {
+        "count": 1,
+        "reason": "the declarative catalog builders mirror the record shapes they populate."
+      },
+      "S1192": {
+        "count": 1,
+        "reason": "the catalog definitions deliberately reuse product vocabulary and JSON schema literals."
+      }
+    },
+    "src/Orbit.Infrastructure/Services/AgentCatalogService.Operations.cs": {
+      "CA1861": {
+        "count": 1,
+        "reason": "the static catalog schemas are evaluated once at startup and are not hot-path allocations."
+      },
+      "S107": {
+        "count": 1,
+        "reason": "the declarative catalog builders mirror the record shapes they populate."
+      },
+      "S1192": {
+        "count": 1,
+        "reason": "the catalog definitions deliberately reuse product vocabulary and JSON schema literals."
+      }
+    },
+    "src/Orbit.Infrastructure/Services/AgentCatalogService.Surfaces.cs": {
+      "CA1861": {
+        "count": 1,
+        "reason": "the static catalog schemas are evaluated once at startup and are not hot-path allocations."
+      },
+      "S107": {
+        "count": 1,
+        "reason": "the declarative catalog builders mirror the record shapes they populate."
+      },
+      "S1192": {
+        "count": 1,
+        "reason": "the catalog definitions deliberately reuse product vocabulary and JSON schema literals."
+      }
+    },
+    "src/Orbit.Infrastructure/Services/AgentCatalogService.UserDataCatalog.cs": {
+      "CA1861": {
+        "count": 1,
+        "reason": "the static catalog schemas are evaluated once at startup and are not hot-path allocations."
+      },
+      "S107": {
+        "count": 1,
+        "reason": "the declarative catalog builders mirror the record shapes they populate."
+      },
+      "S1192": {
+        "count": 1,
+        "reason": "the catalog definitions deliberately reuse product vocabulary and JSON schema literals."
+      }
+    },
+    "src/Orbit.Infrastructure/Services/AgentCatalogService.cs": {
+      "CA1861": {
+        "count": 1,
+        "reason": "the static catalog schemas are evaluated once at startup and are not hot-path allocations."
+      },
+      "S107": {
+        "count": 1,
+        "reason": "the declarative catalog builders mirror the record shapes they populate."
+      },
+      "S1192": {
+        "count": 1,
+        "reason": "the catalog definitions deliberately reuse product vocabulary and JSON schema literals."
+      }
+    },
+    "src/Orbit.Infrastructure/Services/AgentStepUpService.cs": {
+      "ORBIT0004": {
+        "count": 3,
+        "reason": "instant: the step-up challenge cooldown boundary, the challenge TTL, and the CanVerify expiry check."
+      }
+    },
+    "src/Orbit.Infrastructure/Services/AiIntentService.cs": {
+      "CA1873": {
+        "count": 1,
+        "reason": "a file-level disable in a file that uses [LoggerMessage] source generation, verified 2026-09-08: every one of the eleven CA1873 files contains at least one [LoggerMessage] declaration, and the analyzer flags the generated call sites. The reason is not site-specific, because the disable is not: #230 owns narrowing it."
+      }
+    },
+    "src/Orbit.Infrastructure/Services/AiUsageSummaryService.cs": {
+      "ORBIT0004": {
+        "count": 1,
+        "reason": "bucket: the UTC yesterday key for the daily AI-cost summary log."
+      }
+    },
+    "src/Orbit.Infrastructure/Services/AuthSessionService.cs": {
+      "ORBIT0004": {
+        "count": 5,
+        "reason": "instant: the session issue, refresh and revoke instants, and the refresh-token expiry math."
+      }
+    },
+    "src/Orbit.Infrastructure/Services/BackgroundServiceHealthCheck.cs": {
+      "ORBIT0004": {
+        "count": 2,
+        "reason": "instant: the liveness tick stamp and the elapsed-since-last-tick math."
+      }
+    },
+    "src/Orbit.Infrastructure/Services/GoalDeadlineNotificationService.cs": {
+      "ORBIT0004": {
+        "count": 1,
+        "reason": "bucket: a widened UTC streak-lookback prefetch window; per-user today comes from TimeZoneInfo.ConvertTimeFromUtc afterwards."
+      }
+    },
+    "src/Orbit.Infrastructure/Services/GooglePlayBillingService.cs": {
+      "ORBIT0004": {
+        "count": 2,
+        "reason": "instant: the Play subscription expiry fallback and the validity comparison."
+      }
+    },
+    "src/Orbit.Infrastructure/Services/HabitDueDateAdvancementService.cs": {
+      "ORBIT0004": {
+        "count": 1,
+        "reason": "bucket: a widened UTC yesterday prefetch window; per-user advancement uses the converted user clock."
+      }
+    },
+    "src/Orbit.Infrastructure/Services/JwtTokenService.cs": {
+      "ORBIT0004": {
+        "count": 1,
+        "reason": "instant: the JWT Expires claim."
+      }
+    },
+    "src/Orbit.Infrastructure/Services/PendingAgentOperationStore.cs": {
+      "ORBIT0004": {
+        "count": 1,
+        "reason": "instant: the pending-operation usability and expiry check."
+      }
+    },
+    "src/Orbit.Infrastructure/Services/PendingClarificationStore.cs": {
+      "ORBIT0004": {
+        "count": 2,
+        "reason": "instant: the clarification TTL stamp and its expiry sweep."
+      }
+    },
+    "src/Orbit.Infrastructure/Services/PlayNotificationCleanupService.cs": {
+      "ORBIT0004": {
+        "count": 2,
+        "reason": "instant: the Play and Stripe processed-event retention cutoffs."
+      }
+    },
+    "src/Orbit.Infrastructure/Services/ProactiveCheckinSchedulerService.cs": {
+      "ORBIT0004": {
+        "count": 1,
+        "reason": "bucket: the UTC-date dedupe key for SentProactiveCheckin; per-user send timing uses the converted user clock."
+      }
+    },
+    "src/Orbit.Infrastructure/Services/ReminderSchedulerService.cs": {
+      "ORBIT0004": {
+        "count": 4,
+        "reason": "bucket: widened UTC-date prefetch windows, the minimum and maximum local date across all timezones, plus UTC-date dedupe keys; per-user reminder timing uses the converted user clock."
+      }
+    },
+    "src/Orbit.Infrastructure/Services/SlipAlertSchedulerService.cs": {
+      "ORBIT0004": {
+        "count": 1,
+        "reason": "bucket: the UTC-date week key for SentSlipAlert dedupe."
+      }
+    },
+    "src/Orbit.Infrastructure/Services/StripeBillingService.cs": {
+      "ORBIT0004": {
+        "count": 1,
+        "reason": "instant: the CurrentPeriodEnd fallback instant."
+      }
+    },
+    "src/Orbit.Infrastructure/Services/SyncCleanupService.cs": {
+      "ORBIT0004": {
+        "count": 2,
+        "reason": "instant: the tombstone and suggestion retention cutoffs."
+      }
+    }
+  },
+  "suppressMessage": {
+    "src/Orbit.Api/Mcp/Tools/ApiKeyTools.cs": {
+      "S107": {
+        "count": 1,
+        "reason": "the MCP SDK requires individual [Description]-annotated parameters for tool schema generation, so an MCP tool method cannot fold its parameters into an object without losing the tool schema."
+      }
+    },
+    "src/Orbit.Api/Mcp/Tools/GoalTools.cs": {
+      "S107": {
+        "count": 2,
+        "reason": "the MCP SDK requires individual [Description]-annotated parameters for tool schema generation, so an MCP tool method cannot fold its parameters into an object without losing the tool schema."
+      }
+    },
+    "src/Orbit.Api/Mcp/Tools/HabitTools.cs": {
+      "S107": {
+        "count": 4,
+        "reason": "the MCP SDK requires individual [Description]-annotated parameters for tool schema generation, so an MCP tool method cannot fold its parameters into an object without losing the tool schema."
+      }
+    }
+  }
+}

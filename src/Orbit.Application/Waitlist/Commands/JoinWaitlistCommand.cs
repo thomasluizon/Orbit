@@ -23,7 +23,7 @@ public class JoinWaitlistCommandHandler(
         var cacheKey = $"waitlist:{email}";
 
         if (cache.TryGetValue(cacheKey, out DateTime lastSentAt) &&
-#pragma warning disable ORBIT0004 // WHY: pre-existing deliberate UTC instant (expiry/TTL/cutoff math, not a user-facing date), per-site justification ledger: https://github.com/thomasluizon/orbit-api/issues/431
+#pragma warning disable ORBIT0004
             (DateTime.UtcNow - lastSentAt).TotalSeconds < 60)
 #pragma warning restore ORBIT0004
             return Result.Success();

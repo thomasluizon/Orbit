@@ -26,7 +26,7 @@ public class DismissCalendarSuggestionCommandHandler(
         if (suggestion is null)
             return Result.Failure(ErrorMessages.SuggestionNotFound);
 
-#pragma warning disable ORBIT0004 // WHY: pre-existing deliberate UTC instant (expiry/TTL/cutoff math, not a user-facing date), per-site justification ledger: https://github.com/thomasluizon/orbit-api/issues/431
+#pragma warning disable ORBIT0004
         suggestion.MarkDismissed(DateTime.UtcNow);
 #pragma warning restore ORBIT0004
         await unitOfWork.SaveChangesAsync(cancellationToken);
