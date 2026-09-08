@@ -109,7 +109,7 @@ public class PendingAgentOperationStore(
             .OrderByDescending(item => item.CreatedAtUtc)
             .FirstOrDefault();
 
-#pragma warning disable ORBIT0004 // WHY: pre-existing deliberate UTC instant (expiry/TTL/cutoff math, not a user-facing date), per-site justification ledger: https://github.com/thomasluizon/orbit-api/issues/431
+#pragma warning disable ORBIT0004
         if (entity is null || !entity.IsUsable(capabilityId, operationFingerprint, requireStepUp, DateTime.UtcNow))
 #pragma warning restore ORBIT0004
             return false;

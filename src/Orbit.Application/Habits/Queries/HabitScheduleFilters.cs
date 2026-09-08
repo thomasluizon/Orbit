@@ -207,6 +207,8 @@ internal static class HabitScheduleFilters
                     dueDateResolution))
                 continue;
             if (FuzzyMatcher.FuzzyContains(child.Title, term)) return true;
+            if (child.Description != null && FuzzyMatcher.FuzzyContains(child.Description, term)) return true;
+            if (child.Tags.Any(t => FuzzyMatcher.FuzzyContains(t.Name, term))) return true;
             if (HasDescendantMatchingSearch(
                     child.Id,
                     lookup,
@@ -354,6 +356,13 @@ internal static class HabitScheduleFilters
 
             if (FuzzyMatcher.FuzzyContains(child.Title, ctx.Search!))
                 matches.Add(new SearchMatchField("child", child.Title));
+            if (child.Description != null && FuzzyMatcher.FuzzyContains(child.Description, ctx.Search!))
+                matches.Add(new SearchMatchField("description", null));
+            matches.AddRange(child.Tags
+                .Where(tag => FuzzyMatcher.FuzzyContains(tag.Name, ctx.Search!))
+                .Select(tag => new SearchMatchField("tag", tag.Name)));
+
+            AddChildSearchMatches(matches, child.Id, ctx);
         }
     }
 

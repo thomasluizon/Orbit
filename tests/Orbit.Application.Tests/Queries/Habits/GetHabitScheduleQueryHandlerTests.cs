@@ -602,19 +602,192 @@ public class GetHabitScheduleQueryHandlerTests
             .Should().Contain(new FrequencyUnit?[] { FrequencyUnit.Day, FrequencyUnit.Week, null });
     }
 
-    [Fact]
-    public async Task Handle_SearchMatchesChildTitle_ReturnsParent()
+    [Theory]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    [InlineData(3, true)]
+    [InlineData(1, false)]
+    [InlineData(2, false)]
+    [InlineData(3, false)]
+    public async Task Handle_SearchMatchesDescendantTitle_ReturnsParentWithMatchMetadata(
+        int depth, bool withDateRange)
     {
         var parent = CreateTestHabit(title: "Morning Routine", dueDate: Today);
-        var child = CreateTestHabit(title: "Meditation", dueDate: Today, parentHabitId: parent.Id);
-        SetupHabits(parent, child);
+        var unrelated = CreateTestHabit(title: "Read", dueDate: Today);
+        var habits = new List<Habit> { parent, unrelated };
+        var ancestor = parent;
+        for (var level = 1; level < depth; level++)
+        {
+            var intermediate = CreateTestHabit(title: $"Step {level}", parentHabitId: ancestor.Id);
+            habits.Add(intermediate);
+            ancestor = intermediate;
+        }
+        var descendant = CreateTestHabit(title: "Meditation", parentHabitId: ancestor.Id);
+        habits.Add(descendant);
+        SetupHabits(habits.ToArray());
 
-        var query = new GetHabitScheduleQuery(UserId, Today, Today.AddDays(6), Search: "Meditation");
+        var query = new GetHabitScheduleQuery(
+            UserId,
+            withDateRange ? Today : null,
+            withDateRange ? Today.AddDays(6) : null,
+            Search: "Meditation");
         var result = await _handler.Handle(query, CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
-        result.Value.Items.Should().HaveCount(1);
-        result.Value.Items[0].Title.Should().Be("Morning Routine");
+        var item = result.Value.Items.Should().ContainSingle().Subject;
+        item.Id.Should().Be(parent.Id);
+        item.SearchMatches.Should().Equal(new SearchMatchField("child", "Meditation"));
+    }
+
+    [Theory]
+    [InlineData("description", 1, true)]
+    [InlineData("description", 2, true)]
+    [InlineData("description", 3, true)]
+    [InlineData("description", 1, false)]
+    [InlineData("description", 2, false)]
+    [InlineData("description", 3, false)]
+    [InlineData("tag", 1, true)]
+    [InlineData("tag", 2, true)]
+    [InlineData("tag", 3, true)]
+    [InlineData("tag", 1, false)]
+    [InlineData("tag", 2, false)]
+    [InlineData("tag", 3, false)]
+    public async Task Handle_SearchMatchesDescendantField_ReturnsParentWithMatchMetadata(
+        string field, int depth, bool withDateRange)
+    {
+        var parent = CreateTestHabit(title: "Morning Routine");
+        var unrelated = CreateTestHabit(title: "Read");
+        var habits = new List<Habit> { parent, unrelated };
+        var ancestor = parent;
+        for (var level = 1; level < depth; level++)
+        {
+            var intermediate = CreateTestHabit(title: $"Step {level}", parentHabitId: ancestor.Id);
+            habits.Add(intermediate);
+            ancestor = intermediate;
+        }
+        var descendant = CreateSearchDescendant(ancestor.Id, field);
+        habits.Add(descendant);
+        SetupHabits(habits.ToArray());
+
+        var query = new GetHabitScheduleQuery(
+            UserId,
+            withDateRange ? Today : null,
+            withDateRange ? Today.AddDays(6) : null,
+            Search: "Meditation");
+        var result = await _handler.Handle(query, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var item = result.Value.Items.Should().ContainSingle().Subject;
+        item.Id.Should().Be(parent.Id);
+        var expectedMatch = new SearchMatchField(field, field == "tag" ? "Meditation" : null);
+        item.SearchMatches.Should().Equal(expectedMatch);
+        var children = item.Children;
+        for (var level = 1; level <= depth; level++)
+        {
+            var child = children.Should().ContainSingle().Subject;
+            child.SearchMatches.Should().Equal(expectedMatch);
+            children = child.Children;
+        }
+    }
+
+    [Fact]
+    public async Task Handle_SearchMatchesNoDescendant_ReturnsEmptyList()
+    {
+        var parent = CreateTestHabit(title: "Morning Routine");
+        var child = CreateTestHabit(
+            title: "Exercise",
+            description: "Strength training",
+            parentHabitId: parent.Id);
+        child.AddTag(Tag.Create(UserId, "Fitness", "#FF0000").Value);
+        SetupHabits(parent, child);
+
+        var query = new GetHabitScheduleQuery(UserId, null, null, Search: "Meditation");
+        var result = await _handler.Handle(query, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.Items.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("description", true)]
+    [InlineData("description", false)]
+    [InlineData("tag", true)]
+    [InlineData("tag", false)]
+    public async Task Handle_SearchMatchesDescendantField_ExcludesCompletedBranches(
+        string field, bool withDateRange)
+    {
+        var accepted = CreateTestHabit(title: "Morning Routine");
+        var rejected = CreateTestHabit(title: "Evening Routine");
+        var habits = new List<Habit> { accepted, rejected, CreateSearchDescendant(accepted.Id, field) };
+        foreach (var parent in new[] { accepted, rejected })
+        {
+            var completed = CreateSearchDescendant(parent.Id, field, isCompleted: true);
+            habits.Add(completed);
+            habits.Add(CreateSearchDescendant(completed.Id, field));
+        }
+        SetupHabits(habits.ToArray());
+
+        var query = new GetHabitScheduleQuery(
+            UserId,
+            withDateRange ? Today : null,
+            withDateRange ? Today.AddDays(6) : null,
+            Search: "Meditation");
+        var result = await _handler.Handle(query, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var item = result.Value.Items.Should().ContainSingle().Subject;
+        item.Id.Should().Be(accepted.Id);
+        item.SearchMatches.Should().Equal(new SearchMatchField(field, field == "tag" ? "Meditation" : null));
+    }
+
+    [Theory]
+    [InlineData("description")]
+    [InlineData("tag")]
+    public async Task Handle_SearchMatchesDescendantField_PreservesDateAndOverdueGates(string field)
+    {
+        var accepted = CreateTestHabit(title: "Morning Routine");
+        var rejected = CreateTestHabit(title: "Evening Routine");
+        var habits = new List<Habit> { accepted, rejected, CreateSearchDescendant(accepted.Id, field) };
+        foreach (var parent in new[] { accepted, rejected })
+        {
+            var future = CreateSearchDescendant(parent.Id, field, Today.AddDays(7));
+            habits.Add(future);
+            habits.Add(CreateSearchDescendant(future.Id, field));
+            habits.Add(CreateSearchDescendant(parent.Id, field, Today.AddDays(-1)));
+        }
+        SetupHabits(habits.ToArray());
+        var query = new GetHabitScheduleQuery(UserId, Today, Today.AddDays(6), Search: "Meditation");
+        var expectedMatch = new SearchMatchField(field, field == "tag" ? "Meditation" : null);
+
+        var result = await _handler.Handle(query, CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        var item = result.Value.Items.Should().ContainSingle().Subject;
+        item.Id.Should().Be(accepted.Id);
+        item.SearchMatches.Should().Equal(expectedMatch);
+
+        var withOverdue = await _handler.Handle(query with { IncludeOverdue = true }, CancellationToken.None);
+
+        withOverdue.IsSuccess.Should().BeTrue();
+        withOverdue.Value.Items.Select(h => h.Id).Should().BeEquivalentTo(new[] { accepted.Id, rejected.Id });
+        withOverdue.Value.Items.Single(h => h.Id == accepted.Id).SearchMatches.Should().Equal(expectedMatch, expectedMatch);
+        withOverdue.Value.Items.Single(h => h.Id == rejected.Id).SearchMatches.Should().Equal(expectedMatch);
+    }
+
+    private static Habit CreateSearchDescendant(
+        Guid parentHabitId, string field, DateOnly? dueDate = null, bool isCompleted = false)
+    {
+        var habit = CreateTestHabit(
+            title: "Exercise",
+            frequencyUnit: null,
+            frequencyQuantity: null,
+            description: field == "description" ? "Meditation every morning" : null,
+            dueDate: dueDate,
+            isCompleted: isCompleted,
+            parentHabitId: parentHabitId);
+        if (field == "tag")
+            habit.AddTag(Tag.Create(UserId, "Meditation", "#FF0000").Value);
+        return habit;
     }
 
     [Fact]

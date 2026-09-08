@@ -44,7 +44,7 @@ public class AgentStepUpService(
         if (user is null)
             return Result.Failure<AgentStepUpChallenge>(ErrorMessages.UserNotFound);
 
-#pragma warning disable ORBIT0004 // WHY: pre-existing deliberate UTC instant (expiry/TTL/cutoff math, not a user-facing date), per-site justification ledger: https://github.com/thomasluizon/orbit-api/issues/431
+#pragma warning disable ORBIT0004
         var cooldownBoundary = DateTime.UtcNow.AddSeconds(-Math.Max(1, _settings.StepUpChallengeCooldownSeconds));
 #pragma warning restore ORBIT0004
         var recentChallenge = await dbContext.AgentStepUpChallenges
@@ -66,7 +66,7 @@ public class AgentStepUpService(
             userId,
             pendingOperationId,
             HashToken(code),
-#pragma warning disable ORBIT0004 // WHY: pre-existing deliberate UTC instant (expiry/TTL/cutoff math, not a user-facing date), per-site justification ledger: https://github.com/thomasluizon/orbit-api/issues/431
+#pragma warning disable ORBIT0004
             DateTime.UtcNow.AddMinutes(Math.Max(1, _settings.StepUpChallengeTtlMinutes)));
 #pragma warning restore ORBIT0004
 
@@ -100,7 +100,7 @@ public class AgentStepUpService(
                     item.PendingOperationId == pendingOperationId,
                 cancellationToken);
 
-#pragma warning disable ORBIT0004 // WHY: pre-existing deliberate UTC instant (expiry/TTL/cutoff math, not a user-facing date), per-site justification ledger: https://github.com/thomasluizon/orbit-api/issues/431
+#pragma warning disable ORBIT0004
         if (challenge is null || !challenge.CanVerify(_settings.StepUpMaxAttempts, DateTime.UtcNow))
 #pragma warning restore ORBIT0004
             return Result.Failure<PendingAgentOperation>(ErrorMessages.StepUpChallengeNotFound);
