@@ -101,13 +101,37 @@ const csharpFiles = (directory, found = []) => {
  * A pragma line can disable SEVERAL rules at once (`#pragma warning disable CS0649, S3459`), so each
  * id is counted separately. Only `disable` is counted: the matching `restore` closes a block that the
  * `disable` already declared, and counting both would double every site.
+ *
+ * The id list is optional in C#, and that is the bypass this pattern has to see. A bare
+ * `#pragma warning disable`, with no ids at all, disables EVERY warning from that point on, which is
+ * the broadest suppression the language offers. An earlier version of this regex required at least one
+ * id and therefore walked straight past it. It now matches the bare form and reports it under the
+ * synthetic id below, so it fails as an undeclared suppression like anything else.
  */
-const PRAGMA = /^[^\S\n]*#pragma\s+warning\s+disable\s+([^\r\n/]+)/gm
+const PRAGMA = /^[^\S\n]*#pragma\s+warning\s+disable\b([^\r\n/]*)/gm
+/**
+ * The id a bare `#pragma warning disable` is counted under. It is deliberately not a legal C# rule id,
+ * so no allowlist entry can ever declare it and the gate always refuses: disabling every warning at
+ * once is not a site anybody should be able to justify per-site.
+ */
+const ALL_WARNINGS = "(all warnings)"
 /**
  * `[SuppressMessage("Major Code Smell", "S107:Methods should not have too many parameters", ...)]`.
- * The rule id is the second argument up to its colon, confirmed against all seven live attributes.
+ * The rule id is the second argument up to its colon or its closing quote, confirmed against all seven
+ * live attributes.
+ *
+ * `Attribute` is optional in C# attribute syntax, so `[SuppressMessageAttribute(...)]` is the same
+ * attribute and an earlier version of this pattern missed it.
  */
-const SUPPRESS_MESSAGE = /SuppressMessage\s*\(\s*"[^"]*"\s*,\s*"([A-Za-z]+\d+)[:"]/g
+const SUPPRESS_MESSAGE = /SuppressMessage(?:Attribute)?\s*\(\s*"[^"]*"\s*,\s*"([A-Za-z]+\d+)[:"]/g
+
+const pragmaRules = (match) => {
+  const ids = match[1]
+    .split(",")
+    .map((rule) => rule.trim())
+    .filter(Boolean)
+  return ids.length === 0 ? [ALL_WARNINGS] : ids
+}
 
 const countsOf = (body, pattern, extract) => {
   const counts = new Map()
@@ -169,12 +193,31 @@ try {
 } catch {
   fail(2, `check-suppression-allowlist: ${sourceRoot} is not a directory, so this gate would prove nothing`)
 }
+/**
+ * A generated directory is EXEMPTED for the rules it declares, not skipped wholesale. Skipping it
+ * would make the `rules` list decorative: every `.cs` file under `Migrations/` would pass, so a new
+ * analyzer suppression added inside a migration would need no visible change anywhere. The scaffolder
+ * emits `612, 618` and nothing else, so anything else in there is a decision somebody made and it
+ * fails like any other undeclared suppression.
+ */
+const generatedRules = new Map(
+  allowlist.generatedDirectories.map((entry) => [`${entry.path.replace(/\/+$/, "")}/`, new Set(Array.isArray(entry.rules) ? entry.rules : [])]),
+)
+const undeclaredInGenerated = []
+
 for (const absolute of csharpFiles(sourceRoot)) {
   const path = toPosix(absolute)
-  if (isGenerated(path)) continue
   const body = readFileSync(absolute, "utf8")
-  const pragmas = countsOf(body, PRAGMA, (match) => match[1].split(",").map((rule) => rule.trim()).filter(Boolean))
+  const pragmas = countsOf(body, PRAGMA, pragmaRules)
   const attributes = countsOf(body, SUPPRESS_MESSAGE, (match) => [match[1]])
+  const generatedPrefix = [...generatedRules.keys()].find((prefix) => path.startsWith(prefix))
+  if (generatedPrefix) {
+    const permitted = generatedRules.get(generatedPrefix)
+    for (const rule of [...pragmas.keys(), ...attributes.keys()]) {
+      if (!permitted.has(rule)) undeclaredInGenerated.push(`${path} suppresses ${rule}, which ${generatedPrefix} does not declare as generated`)
+    }
+    continue
+  }
   if (pragmas.size > 0) observed.pragmas[path] = Object.fromEntries([...pragmas].sort(([left], [right]) => (left < right ? -1 : 1)))
   if (attributes.size > 0) observed.suppressMessage[path] = Object.fromEntries([...attributes].sort(([left], [right]) => (left < right ? -1 : 1)))
 }
@@ -188,7 +231,7 @@ if (printOnly) {
   process.exit(0)
 }
 
-const problems = []
+const problems = [...undeclaredInGenerated]
 let declaredSites = 0
 
 for (const kind of ["pragmas", "suppressMessage"]) {

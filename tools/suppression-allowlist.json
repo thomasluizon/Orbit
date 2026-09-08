@@ -4,9 +4,10 @@
       "path": "src/Orbit.Infrastructure/Migrations",
       "rules": [
         "612",
-        "618"
+        "618",
+        "CA1814"
       ],
-      "reason": "EF Core emits `#pragma warning disable 612, 618` around BuildTargetModel in every migration designer, so these are generated code and not a decision anybody made. `Guard Migrations` already fails any pull request that edits an applied migration, which is the gate that matters for this directory. Declared here rather than skipped by a regex, so the exemption is data a reviewer reads in the diff."
+      "reason": "EF Core emits these, so they are generated code and not a decision anybody made. `612, 618` wrap BuildTargetModel in every migration designer. `CA1814` appears in exactly the two migrations that call InsertData with a `new object[,]` row block, verified 2026-09-08: those two are the only files under this directory using that construct, and they are the only two carrying the pragma. `Guard Migrations` already fails any pull request that edits an applied migration, which is the gate that matters here. The rules list is EXHAUSTIVE and enforced: any other suppression under this directory fails like an undeclared one anywhere else, so this entry exempts three rule ids rather than a whole subtree."
     }
   ],
   "ruleVerdicts": {

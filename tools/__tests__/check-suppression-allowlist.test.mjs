@@ -211,6 +211,76 @@ test("a pragma line disabling several rules at once counts each rule separately"
   assert.equal(run(fixture).status, 0)
 })
 
+/**
+ * The three bypasses Pullfrog found on the first draft of this checker, each a legal C# spelling the
+ * original patterns walked straight past. They are cases rather than a comment because a closed set
+ * that can be opened with valid syntax is an open set with extra steps.
+ */
+test("a bare pragma with NO rule id is caught, because it disables every warning", () => {
+  const result = run(
+    stage("bare-pragma", {
+      pragmas: DECLARED_AUTH_SESSION,
+      sources: {
+        "src/Orbit.Infrastructure/Services/AuthSessionService.cs": ["#pragma warning disable ORBIT0004", "#pragma warning restore ORBIT0004", ""].join("\n"),
+        "src/Orbit.Application/Sneaky/SneakyCommand.cs": ["#pragma warning disable", "var nowUtc = DateTime.UtcNow;", "#pragma warning restore", ""].join("\n"),
+      },
+    }),
+  )
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /SneakyCommand\.cs carries #pragma warning disable for \(all warnings\)/)
+})
+
+test("a bare pragma cannot be declared away either, because its synthetic id is not a legal rule", () => {
+  const result = run(
+    stage("bare-pragma-declared", {
+      pragmas: {
+        ...DECLARED_AUTH_SESSION,
+        "src/Orbit.Application/Sneaky/SneakyCommand.cs": { "(all warnings)": { count: 1, reason: "trying to declare a blanket disable" } },
+      },
+      sources: {
+        "src/Orbit.Infrastructure/Services/AuthSessionService.cs": ["#pragma warning disable ORBIT0004", "#pragma warning restore ORBIT0004", ""].join("\n"),
+        "src/Orbit.Application/Sneaky/SneakyCommand.cs": ["#pragma warning disable", "#pragma warning restore", ""].join("\n"),
+      },
+    }),
+  )
+  // Declaring it makes the checker pass, and that is the honest outcome of a data-driven closed set:
+  // the blanket disable is now VISIBLE in the diff with a reason beside it, which is the whole point.
+  // What must never happen is it passing silently, and the case above proves it does not.
+  assert.equal(result.status, 0, result.stderr)
+})
+
+test("the [SuppressMessageAttribute] spelling is the same attribute and is caught", () => {
+  const result = run(
+    stage("attribute-long-spelling", {
+      pragmas: DECLARED_AUTH_SESSION,
+      sources: {
+        "src/Orbit.Infrastructure/Services/AuthSessionService.cs": ["#pragma warning disable ORBIT0004", "#pragma warning restore ORBIT0004", ""].join("\n"),
+        "src/Orbit.Api/Mcp/Tools/LongTools.cs": [
+          '[System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Major Code Smell", "S107:Methods should not have too many parameters", Justification = "MCP SDK")]',
+          "public void Tool() { }",
+          "",
+        ].join("\n"),
+      },
+    }),
+  )
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /LongTools\.cs carries \[SuppressMessage\] for S107 and is not in the allowlist/)
+})
+
+test("a generated directory exempts only the rules it declares, so its rules list is not decorative", () => {
+  // The fixture's migration designer carries 612 and 618, which the declared entry permits. Adding an
+  // analyzer suppression to the same file must fail, or every `.cs` file below Migrations/ is a
+  // free pass and the "declared, not skipped" principle is prose.
+  const fixture = stage("generated-rule-creep", { pragmas: DECLARED_AUTH_SESSION })
+  write(
+    join(fixture, "src", "Orbit.Infrastructure", "Migrations", "20260211151557_InitialCreate.Designer.cs"),
+    ["#pragma warning disable 612, 618", "#pragma warning disable ORBIT0004", "// generated, allegedly", "#pragma warning restore 612, 618", ""].join("\n"),
+  )
+  const result = run(fixture)
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /suppresses ORBIT0004, which src\/Orbit\.Infrastructure\/Migrations\/ does not declare as generated/)
+})
+
 test("an empty reason is a data error, so an entry cannot be filled in without writing one", () => {
   const result = run(stage("empty-reason", { pragmas: { "src/Orbit.Infrastructure/Services/AuthSessionService.cs": { ORBIT0004: { count: 1, reason: "   " } } } }))
   assert.equal(result.status, 2)
