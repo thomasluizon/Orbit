@@ -354,13 +354,11 @@ internal static class HabitScheduleFilters
                     continue;
             }
 
-            if (FuzzyMatcher.FuzzyContains(child.Title, ctx.Search!))
+            var childMatches = FuzzyMatcher.FuzzyContains(child.Title, ctx.Search!)
+                || child.Description != null && FuzzyMatcher.FuzzyContains(child.Description, ctx.Search!)
+                || child.Tags.Any(tag => FuzzyMatcher.FuzzyContains(tag.Name, ctx.Search!));
+            if (childMatches)
                 matches.Add(new SearchMatchField("child", child.Title));
-            if (child.Description != null && FuzzyMatcher.FuzzyContains(child.Description, ctx.Search!))
-                matches.Add(new SearchMatchField("description", null));
-            matches.AddRange(child.Tags
-                .Where(tag => FuzzyMatcher.FuzzyContains(tag.Name, ctx.Search!))
-                .Select(tag => new SearchMatchField("tag", tag.Name)));
 
             AddChildSearchMatches(matches, child.Id, ctx);
         }
