@@ -96,32 +96,25 @@ public class UserStreakService(
         if (user is null)
             return null;
 
-        // TWO windows, deliberately. The streak itself is defined over the ordinary lookback, but
-        // eligibility needs ONE occurrence before the gap and on a yearly cadence that predecessor sits
-        // 366 days earlier, outside it. Completions and freezes are loaded across the wider span; the
-        // SCHEDULE is not, because GetStreakScheduledDates caps a generated range at 366 days, so one
-        // widened request silently truncated the RECENT end and lost the gap itself.
+        // ONE window, and it is the streak engine's own. Eligibility must be decided over exactly the
+        // history CalculateStateAsync computes from, or a repair can be accepted on evidence the engine
+        // cannot see: the response, and the next RecalculateAsync, would recompute a zero streak and
+        // persist it AFTER the freeze was spent. A yearly predecessor sits 366 days back, outside this
+        // window, so a yearly gap stays unrepairable rather than repairable-then-silently-undone.
         var lookbackStart = userToday.AddDays(-AppConstants.MaxStreakLookbackDays);
-        var predecessorStart = lookbackStart.AddDays(-AppConstants.MaxScheduleSpanDays);
-        // The gap ITSELF stays inside the ordinary streak window; only its predecessor may sit earlier.
         var gapStart = dates.Min();
         if (gapStart <= lookbackStart)
             return null;
 
         var (completions, freezes, eligibleHabits) =
-            await LoadStreakDataAsync(userId, predecessorStart, cancellationToken);
+            await LoadStreakDataAsync(userId, lookbackStart, cancellationToken);
         var contributingHabits = GetContributingHabits(eligibleHabits);
         if (!contributingHabits.Any(habit => habit.FrequencyUnit is not null))
             return null;
 
-        // TWO bounded queries, then their union. GetStreakScheduledDates caps a generated range at
-        // MaxRangeDays, so ONE request spanning both windows silently truncated the RECENT end and lost
-        // the gap itself. Two requests, each inside the cap, lose nothing at either end.
         var timeZone = TimeZoneHelper.FindTimeZone(user.TimeZone, userId: user.Id);
         var expectedDates = HabitScheduleService.GetUnionScheduledDatesForStreak(
             contributingHabits, lookbackStart, userToday, timeZone, user.WeekStartDay);
-        expectedDates.UnionWith(HabitScheduleService.GetUnionScheduledDatesForStreak(
-            contributingHabits, predecessorStart, lookbackStart, timeZone, user.WeekStartDay));
         if (dates.Any(date => !expectedDates.Contains(date) || completions.Contains(date) || freezes.Contains(date)))
             return null;
 
@@ -143,6 +136,8 @@ public class UserStreakService(
             return null;
         }
 
+        // Index 0 means the gap opens the window with no predecessor inside it, so there is no evidence
+        // the streak was alive going in.
         if (gapStartIndex == 0)
             return null;
         var precedingDate = scheduled[gapStartIndex - 1];
@@ -157,11 +152,11 @@ public class UserStreakService(
         }
 
         var (currentStreak, _) = HabitScheduleService.ComputeStreakAsOf(
-            expectedDates, completions, freezes, predecessorStart, userToday);
+            expectedDates, completions, freezes, lookbackStart, userToday);
         var repairedDates = new HashSet<DateOnly>(freezes);
         repairedDates.UnionWith(dates);
         var (repairedStreak, lastActiveDate) = HabitScheduleService.ComputeStreakAsOf(
-            expectedDates, completions, repairedDates, predecessorStart, userToday);
+            expectedDates, completions, repairedDates, lookbackStart, userToday);
         if (repairedStreak <= currentStreak)
             return null;
 

@@ -278,26 +278,27 @@ public class StreakGapRepairTests
     }
 
     /// <summary>
-    /// The history-boundary case. A yearly occurrence on yesterday has its predecessor 366 days before
-    /// the gap, which fell outside the 365-day window, so the gap read as index 0 and was always
-    /// refused. The window is widened by exactly one cadence span so the predecessor is loadable.
+    /// A yearly gap is REFUSED, deliberately, and this pins why. Its predecessor sits 366 days back,
+    /// outside the window the streak engine itself computes from. Accepting it on widened history was
+    /// worse than refusing it: the response and the next RecalculateAsync both run on the ordinary
+    /// window, would see yesterday's freeze without the preceding completion, and would persist a zero
+    /// streak AFTER the freeze had been spent. Eligibility is decided over exactly the history that can
+    /// represent the result. Yearly support needs the engine's own window widened, which is its own
+    /// change.
     /// </summary>
     [Fact]
-    public async Task YearlyGapWhosePredecessorSitsBeyondTheStreakWindow_IsRepairable()
+    public async Task YearlyGapWhosePredecessorSitsBeyondTheStreakWindow_IsRefused()
     {
         _habit = SetYearlyHistory();
 
-        var state = await _service.EvaluateGapRepairAsync(_user.Id, _today, [_today.AddDays(-1)]);
-
-        state.Should().NotBeNull();
-        state!.PrecedingScheduledDate.Should().Be(_today.AddDays(-1).AddYears(-1));
+        (await _service.EvaluateGapRepairAsync(_user.Id, _today, [_today.AddDays(-1)])).Should().BeNull();
     }
 
     /// <summary>
-    /// A habit older than the widened start. The schedule generator caps a requested range at 366 days,
-    /// so asking for the whole widened span in one call truncated the RECENT end: the gap ending
-    /// yesterday fell outside the generated dates and a valid repair reported unavailable. The recent
-    /// window and the predecessor are now fetched as two bounded queries.
+    /// A habit older than the streak window, so its effectiveFrom sits at that boundary.
+    /// A gap ending yesterday must still repair: the habit predating the window never truncates the
+    /// recent end, because the request stays inside the generator.s range cap.
+    ///
     /// </summary>
     [Fact]
     public async Task DailyHabitOlderThanTheWidenedStart_StillRepairsAGapEndingYesterday()
@@ -425,9 +426,9 @@ public class StreakGapRepairTests
     }
 
     /// <summary>
-    /// A daily habit created 800 days ago, which is older than the widened predecessor start, so its
-    /// effectiveFrom sits at that boundary and the generator's 366-day cap decides where generation
-    /// stops. Completions run up to the day before the gap.
+    /// A daily habit created 800 days ago, far older than the streak window, so its
+    /// effectiveFrom sits at the window boundary rather than at its creation date.
+    /// Completions run up to the day before the gap.
     /// </summary>
     private Habit SetLongRunningDailyHistory()
     {

@@ -68,13 +68,6 @@ public static class AppConstants
     public const int MaxStreakFreezesAccumulated = 3;
     public const int StreakDaysPerFreeze = 7;
     public const int MaxStreakLookbackDays = 365;
-
-    /// <summary>
-    /// The longest span between two consecutive scheduled occurrences of a supported cadence, which is
-    /// a yearly habit at 366 days (HabitScheduleService.GetLookbackDays caps yearly there). Gap repair
-    /// widens its history by this much so a gap's immediate predecessor is always loadable.
-    /// </summary>
-    public const int MaxScheduleSpanDays = 366;
     public const int MaxSyncWindowDays = 30;
     public const int SyncCleanupMarginDays = 1;
     public const int MaxFriends = 500;
