@@ -128,6 +128,36 @@ public class StreakGapRepairTests
         user.LastFreezeAwardStreak.Should().Be(14);
     }
 
+    [Fact]
+    public async Task LegacyPersistedUserWithoutSavedCursor_DoesNotReawardRestoredMilestone()
+    {
+        var options = new DbContextOptionsBuilder<OrbitDbContext>()
+            .UseInMemoryDatabase($"LegacyStreakGapCursor_{Guid.NewGuid()}").Options;
+        await using (var context = new OrbitDbContext(options))
+        {
+            _user.SetStreakState(14, 14, _today.AddDays(-3));
+            _user.AwardStreakFreezeIfEligible();
+            _user.SetStreakState(0, 14, null);
+            context.Users.Add(_user);
+            context.Entry(_user).Property(user => user.PreGapFreezeAwardStreak).CurrentValue = null;
+            context.Entry(_user).Property(user => user.PreGapLastActiveDate).CurrentValue = null;
+            await context.SaveChangesAsync();
+        }
+
+        await using var reloaded = new OrbitDbContext(options);
+        var user = await reloaded.Users.SingleAsync(candidate => candidate.Id == _user.Id);
+        user.PreGapFreezeAwardStreak.Should().BeNull();
+        user.PreGapLastActiveDate.Should().BeNull();
+        user.LastFreezeAwardStreak.Should().Be(0);
+        user.ConsumeStreakFreezes(2).IsSuccess.Should().BeTrue();
+        user.RestoreStreakAfterGapRepair(14, 14, _today.AddDays(-1), _today.AddDays(-3));
+        user.UpdateStreak(_today);
+
+        user.AwardStreakFreezeIfEligible().Should().BeFalse();
+        user.StreakFreezesAccumulated.Should().Be(0);
+        user.LastFreezeAwardStreak.Should().Be(14);
+    }
+
     [Theory]
     [InlineData(2, true, 0)]
     [InlineData(1, false, 1)]

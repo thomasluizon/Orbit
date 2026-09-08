@@ -7,6 +7,8 @@ namespace Orbit.Domain.Entities;
 
 public partial class User : Entity
 {
+    private const int DefaultStreakDaysPerFreeze = 7;
+
     [GeneratedRegex(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 1000)]
     private static partial Regex EmailRegex();
 
@@ -590,19 +592,20 @@ public partial class User : Entity
     {
         var awardCursor = PreGapLastActiveDate == precedingDate && PreGapFreezeAwardStreak.HasValue
             ? PreGapFreezeAwardStreak.Value
-            : LastFreezeAwardStreak;
+            : GetEligibleFreezeAwardStreak(currentStreak, DefaultStreakDaysPerFreeze);
         SetStreakState(currentStreak, longestStreak, lastActiveDate);
         LastFreezeAwardStreak = awardCursor;
         PreGapFreezeAwardStreak = null;
         PreGapLastActiveDate = null;
     }
 
-    public bool AwardStreakFreezeIfEligible(int maxAccumulated = 3, int daysPerFreeze = 7)
+    public bool AwardStreakFreezeIfEligible(
+        int maxAccumulated = 3, int daysPerFreeze = DefaultStreakDaysPerFreeze)
     {
         if (CurrentStreak < daysPerFreeze)
             return false;
 
-        var eligibleMilestone = CurrentStreak - (CurrentStreak % daysPerFreeze);
+        var eligibleMilestone = GetEligibleFreezeAwardStreak(CurrentStreak, daysPerFreeze);
 
         if (StreakFreezesAccumulated >= maxAccumulated)
         {
@@ -620,6 +623,9 @@ public partial class User : Entity
         LastFreezeAwardStreak += awardable * daysPerFreeze;
         return awardable > 0;
     }
+
+    private static int GetEligibleFreezeAwardStreak(int currentStreak, int daysPerFreeze) =>
+        currentStreak - (currentStreak % daysPerFreeze);
 
     public Result ConsumeStreakFreezes(int count)
     {

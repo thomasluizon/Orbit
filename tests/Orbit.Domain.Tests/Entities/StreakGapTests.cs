@@ -9,9 +9,9 @@ public class StreakGapTests
     private static readonly DateOnly Today = new(2026, 9, 6);
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void RestoreStreakAfterGapRepair_PreservesActualCursor(bool recalculated)
+    [InlineData(false, 14)]
+    [InlineData(true, 7)]
+    public void RestoreStreakAfterGapRepair_UsesSavedOrDerivedCursor(bool recalculated, int expectedCursor)
     {
         var user = User.Create("Test", "test@example.com").Value;
         user.SetStreakState(7, 7, Today.AddDays(-10));
@@ -26,7 +26,7 @@ public class StreakGapTests
 
         user.RestoreStreakAfterGapRepair(14, 14, Today.AddDays(-1), Today.AddDays(-3));
 
-        user.LastFreezeAwardStreak.Should().Be(7);
+        user.LastFreezeAwardStreak.Should().Be(expectedCursor);
         user.PreGapFreezeAwardStreak.Should().BeNull();
         user.PreGapLastActiveDate.Should().BeNull();
     }
