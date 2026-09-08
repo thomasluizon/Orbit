@@ -25,7 +25,7 @@ public sealed partial class OAuthAuthorizationStore : IDisposable
         var code = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
             .Replace("+", "-").Replace("/", "_").TrimEnd('=');
 
-#pragma warning disable ORBIT0004 // WHY: pre-existing deliberate UTC instant (expiry/TTL/cutoff math, not a user-facing date), per-site justification ledger: https://github.com/thomasluizon/orbit-api/issues/431
+#pragma warning disable ORBIT0004
         var entry = new AuthorizationEntry(userId, codeChallenge, redirectUri, clientId, nonce, DateTime.UtcNow);
 #pragma warning restore ORBIT0004
         _codes[code] = entry;
@@ -37,7 +37,7 @@ public sealed partial class OAuthAuthorizationStore : IDisposable
         if (!_codes.TryRemove(code, out var entry))
             return null;
 
-#pragma warning disable ORBIT0004 // WHY: pre-existing deliberate UTC instant (expiry/TTL/cutoff math, not a user-facing date), per-site justification ledger: https://github.com/thomasluizon/orbit-api/issues/431
+#pragma warning disable ORBIT0004
         if (DateTime.UtcNow - entry.CreatedAt > CodeExpiry)
 #pragma warning restore ORBIT0004
             return null;
@@ -57,7 +57,7 @@ public sealed partial class OAuthAuthorizationStore : IDisposable
 
     private void Cleanup()
     {
-#pragma warning disable ORBIT0004 // WHY: pre-existing deliberate UTC instant (expiry/TTL/cutoff math, not a user-facing date), per-site justification ledger: https://github.com/thomasluizon/orbit-api/issues/431
+#pragma warning disable ORBIT0004
         var cutoff = DateTime.UtcNow - CodeExpiry;
 #pragma warning restore ORBIT0004
         foreach (var kvp in _codes)

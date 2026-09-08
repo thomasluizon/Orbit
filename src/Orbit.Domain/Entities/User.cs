@@ -251,13 +251,14 @@ public partial class User : Entity
             SubscriptionInterval = interval.Value;
     }
 
-    public void SetPlaySubscription(string purchaseToken, DateTime expiresAt, SubscriptionInterval? interval = null)
+    public void SetPlaySubscription(string purchaseToken, DateTime expiresAt,
+        SubscriptionInterval? interval = null, bool isInGracePeriod = false)
     {
         PlayPurchaseToken = purchaseToken;
         PlanExpiresAt = expiresAt;
         Plan = UserPlan.Pro;
         SubscriptionSource = Enums.SubscriptionSource.GooglePlay;
-        SubscriptionLapseReason = null;
+        SubscriptionLapseReason = isInGracePeriod ? Enums.SubscriptionLapseReason.PaymentFailed : null;
         SubscriptionEndedAtUtc = null;
         if (interval.HasValue)
             SubscriptionInterval = interval.Value;

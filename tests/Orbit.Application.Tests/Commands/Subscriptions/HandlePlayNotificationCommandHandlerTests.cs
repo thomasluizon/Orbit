@@ -11,6 +11,7 @@ using NSubstitute.ExceptionExtensions;
 using Orbit.Application.Behaviors;
 using Orbit.Application.Common;
 using Orbit.Application.Subscriptions.Commands;
+using Orbit.Application.Subscriptions.Queries;
 using Orbit.Application.Subscriptions.Services;
 using Orbit.Domain.Common;
 using Orbit.Domain.Entities;
@@ -29,7 +30,7 @@ public class HandlePlayNotificationCommandHandlerTests
     private readonly HandlePlayNotificationCommandHandler _handler;
 
     private static readonly IOptions<GooglePlaySettings> Settings = Options.Create(
-        new GooglePlaySettings { ProductId = "orbit_pro", MonthlyBasePlanId = "monthly", YearlyBasePlanId = "yearly" });
+        new GooglePlaySettings { PackageName = "org.useorbit.app", ProductId = "orbit_pro", MonthlyBasePlanId = "monthly", YearlyBasePlanId = "yearly" });
 
     public HandlePlayNotificationCommandHandlerTests()
     {
@@ -96,19 +97,92 @@ public class HandlePlayNotificationCommandHandlerTests
         await _playBilling.DidNotReceive().VerifyAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
-    [Fact]
-    public async Task Handle_ActiveState_GrantsPro()
+    [Theory]
+    [InlineData("SUBSCRIPTION_STATE_ACTIVE", 2, null)]
+    [InlineData("SUBSCRIPTION_STATE_ACTIVE", 6, null)]
+    [InlineData("SUBSCRIPTION_STATE_IN_GRACE_PERIOD", 6, SubscriptionLapseReason.PaymentFailed)]
+    [InlineData("SUBSCRIPTION_STATE_IN_GRACE_PERIOD", 2, SubscriptionLapseReason.PaymentFailed)]
+    [InlineData("SUBSCRIPTION_STATE_IN_GRACE_PERIOD", 3, SubscriptionLapseReason.PaymentFailed)]
+    public async Task Handle_ActiveState_GrantsPro(string subscriptionState, int notificationType,
+        SubscriptionLapseReason? expectedReason)
     {
         var user = User.Create("Thomas", "test@example.com").Value;
+        var expiresAt = DateTime.UtcNow.AddMonths(1);
+        user.SetPlaySubscription("tok_renew", expiresAt, SubscriptionInterval.Monthly);
+        user.RecordSubscriptionLapseReason(SubscriptionSource.GooglePlay, SubscriptionLapseReason.PaymentFailed);
         StubUser(user);
-        StubVerify(new PlaySubscriptionState(true, DateTime.UtcNow.AddMonths(1), SubscriptionInterval.Monthly, true, "orbit_pro", null, null));
+        using var play = new PlayBillingTestClient(subscriptionState, expiresAt, user.Id, Settings);
+        StubVerify(await play.Billing.VerifyAsync("orbit_pro", "tok_renew", CancellationToken.None));
 
-        var result = await _handler.Handle(new HandlePlayNotificationCommand(BuildPushBody(2, "tok_renew", "orbit_pro")), CancellationToken.None);
+        var result = await _handler.Handle(new HandlePlayNotificationCommand(BuildPushBody(notificationType, "tok_renew", "orbit_pro")), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
         user.IsPro.Should().BeTrue();
+        user.HasProAccess.Should().BeTrue();
+        user.SubscriptionLapseReason.Should().Be(expectedReason);
+        user.SubscriptionEndedAtUtc.Should().BeNull();
         user.PlayPurchaseToken.Should().Be("tok_renew");
         await _unitOfWork.Received().SaveChangesAsync(Arg.Any<CancellationToken>());
+
+        _userRepo.GetByIdAsync(user.Id, Arg.Any<CancellationToken>()).Returns(user);
+        var dates = Substitute.For<IUserDateService>();
+        dates.GetUserTodayAsync(user.Id, Arg.Any<CancellationToken>()).Returns(new DateOnly(2026, 9, 6));
+        var status = await new GetSubscriptionStatusQueryHandler(_userRepo, Substitute.For<IPayGateService>(), dates)
+            .Handle(new GetSubscriptionStatusQuery(user.Id), CancellationToken.None);
+
+        status.IsSuccess.Should().BeTrue();
+        status.Value.HasProAccess.Should().BeTrue();
+        status.Value.Source.Should().Be("play");
+        status.Value.LapseReason.Should().Be(expectedReason == SubscriptionLapseReason.PaymentFailed ? "payment_failed" : null);
+        status.Value.SubscriptionEndedAtUtc.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("SUBSCRIPTION_STATE_ON_HOLD", 5, SubscriptionLapseReason.PaymentFailed)]
+    [InlineData("SUBSCRIPTION_STATE_PAUSED", 10, SubscriptionLapseReason.Expired)]
+    public async Task Handle_VerifiedNonEntitledState_RemovesAccessWithExistingReason(
+        string subscriptionState, int notificationType, SubscriptionLapseReason expectedReason)
+    {
+        var user = User.Create("Thomas", "test@example.com").Value;
+        user.StartTrial(DateTime.UtcNow.AddDays(-1));
+        user.SetPlaySubscription("tok_old", DateTime.UtcNow.AddMonths(1), SubscriptionInterval.Monthly);
+        StubUser(user);
+        using var play = new PlayBillingTestClient(subscriptionState, DateTime.UtcNow.AddMonths(1), user.Id, Settings);
+        StubVerify(await play.Billing.VerifyAsync("orbit_pro", "tok_old", CancellationToken.None));
+
+        var result = await _handler.Handle(
+            new HandlePlayNotificationCommand(BuildPushBody(notificationType, "tok_old", "orbit_pro")), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        user.IsPro.Should().BeFalse();
+        user.HasProAccess.Should().BeFalse();
+        user.SubscriptionSource.Should().BeNull();
+        user.SubscriptionLapseReason.Should().Be(expectedReason);
+        user.SubscriptionEndedAtUtc.Should().NotBeNull();
+        await _unitOfWork.Received().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Handle_PlayGraceWhileStripeOwnsEntitlement_PreservesStripeReason()
+    {
+        var user = User.Create("Thomas", "test@example.com").Value;
+        var stripeExpiry = DateTime.UtcNow.AddMonths(2);
+        user.SetStripeSubscription("sub_test", stripeExpiry);
+        user.RecordSubscriptionLapseReason(SubscriptionSource.Stripe, SubscriptionLapseReason.Canceled);
+        user.LinkPlayPurchaseToken("tok_old");
+        StubUser(user);
+        using var play = new PlayBillingTestClient("SUBSCRIPTION_STATE_IN_GRACE_PERIOD",
+            DateTime.UtcNow.AddMonths(1), user.Id, Settings);
+        StubVerify(await play.Billing.VerifyAsync("orbit_pro", "tok_old", CancellationToken.None));
+
+        var result = await _handler.Handle(
+            new HandlePlayNotificationCommand(BuildPushBody(6, "tok_old", "orbit_pro")), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        user.SubscriptionSource.Should().Be(SubscriptionSource.Stripe);
+        user.PlanExpiresAt.Should().Be(stripeExpiry);
+        user.SubscriptionLapseReason.Should().Be(SubscriptionLapseReason.Canceled);
+        user.SubscriptionEndedAtUtc.Should().BeNull();
     }
 
     [Fact]

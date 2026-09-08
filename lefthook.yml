@@ -9,6 +9,8 @@ pre-commit:
       stage_fixed: true
     dashes:
       run: node tools/check-dashes.mjs --files {staged_files}
+    suppression-allowlist:
+      run: node tools/check-suppression-allowlist.mjs
 pre-push:
   commands:
     protect-main:
