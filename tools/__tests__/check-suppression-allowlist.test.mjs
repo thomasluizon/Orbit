@@ -406,6 +406,63 @@ test("the escaped spelling really is invisible to a raw text scan, so this case 
   assert.match(ESCAPED_ATTRIBUTE, /Supp\\u0072essMessage/)
 })
 
+/**
+ * C# identifier equality has a SECOND step: after decoding escapes it removes Unicode category Cf
+ * formatting characters, so `Supp<ZWNJ>ressMessage` is the identifier `SuppressMessage`. Decoding alone
+ * left that spelling invisible, which is why the normalizer applies both steps the language defines
+ * rather than the one that was noticed first.
+ */
+const ZERO_WIDTH_NON_JOINER = String.fromCharCode(0x200c)
+const FORMAT_CHAR_ATTRIBUTE = `[System.Diagnostics.CodeAnalysis.Supp${ZERO_WIDTH_NON_JOINER}ressMessage("Major Code Smell", "S107:Methods should not have too many parameters")]`
+
+test("the format-character spelling is invisible to a raw scan and to escape decoding alone", () => {
+  assert.equal(/\bSuppressMessage\b/.test(FORMAT_CHAR_ATTRIBUTE), false)
+  assert.equal(FORMAT_CHAR_ATTRIBUTE.includes(ZERO_WIDTH_NON_JOINER), true)
+})
+
+test("a Cf format character inside the attribute name is normalized away, not walked past", () => {
+  const result = run(
+    stage("format-character", {
+      pragmas: DECLARED_AUTH_SESSION,
+      sources: {
+        "src/Orbit.Infrastructure/Services/AuthSessionService.cs": AUTH_SESSION_SOURCE,
+        "src/Orbit.Api/Mcp/Tools/FormatTools.cs": [FORMAT_CHAR_ATTRIBUTE, "public void Tool() { }", ""].join("\n"),
+      },
+    }),
+  )
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /FormatTools\.cs carries \[SuppressMessage\] for S107 and is not in the allowlist/)
+})
+
+test("an escape that decodes TO a format character is caught too, so the two steps compose", () => {
+  // `‌` decodes to the ZWNJ, which the second step then removes. Neither step alone sees this.
+  const escapedFormat = `[System.Diagnostics.CodeAnalysis.Supp\\u200${(0xc).toString(16)}ressMessage("Major Code Smell", "S107:Methods should not have too many parameters")]`
+  const result = run(
+    stage("escaped-format-character", {
+      pragmas: DECLARED_AUTH_SESSION,
+      sources: {
+        "src/Orbit.Infrastructure/Services/AuthSessionService.cs": AUTH_SESSION_SOURCE,
+        "src/Orbit.Api/Mcp/Tools/BothTools.cs": [escapedFormat, "public void Tool() { }", ""].join("\n"),
+      },
+    }),
+  )
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /BothTools\.cs carries \[SuppressMessage\] for S107 and is not in the allowlist/)
+})
+
+test("a UTF-8 BOM does not become a finding, because stripping Cf cannot manufacture a mention", () => {
+  // 234 files under src/ carry exactly one Cf character each: the BOM on every generated migration.
+  const result = run(
+    stage("bom", {
+      pragmas: DECLARED_AUTH_SESSION,
+      sources: {
+        "src/Orbit.Infrastructure/Services/AuthSessionService.cs": `﻿${AUTH_SESSION_SOURCE}`,
+      },
+    }),
+  )
+  assert.equal(result.status, 0, result.stderr)
+})
+
 test("an identifier escape in the attribute name is decoded, not walked past", () => {
   const result = run(
     stage("identifier-escape", {

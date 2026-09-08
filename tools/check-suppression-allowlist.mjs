@@ -165,7 +165,8 @@ const pragmaRules = (match) => {
 }
 
 /**
- * C# permits Unicode escape sequences INSIDE an identifier, so `SuppressMessage` is the same
+ * C# identifier equality is defined in two steps, and this applies BOTH. Escape sequences are legal
+ * inside an identifier, so `SuppressMessage` is the same
  * identifier as `SuppressMessage` and a text scanner reading the raw bytes sees neither. Verified:
  * against the raw source the mention invariant counts 0, against the decoded source it counts 1.
  *
@@ -183,10 +184,17 @@ const pragmaRules = (match) => {
  * repository. Real closure needs resolved symbols: a Roslyn analyzer, or an inventory taken from
  * `dotnet build` warning output. That is a bigger change than this ticket and it is worth its own.
  */
-const decodeIdentifierEscapes = (source) =>
+const normalizeIdentifiers = (source) =>
   source
     .replace(/\\u([0-9a-fA-F]{4})/g, (_match, hex) => String.fromCharCode(parseInt(hex, 16)))
     .replace(/\\U([0-9a-fA-F]{8})/g, (_match, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    // Step two, and it is the same rule the language defines rather than another guess: C# identifier
+    // equality REMOVES Unicode category Cf formatting characters after decoding escapes, so
+    // `Supp<ZWNJ>ressMessage` is the identifier `SuppressMessage`. Decoding alone left that spelling
+    // invisible. Removing Cf cannot manufacture a match out of ordinary text: 234 files under `src/`
+    // already carry exactly one Cf character each, the UTF-8 BOM on every generated migration, and
+    // stripping a BOM produces nothing.
+    .replace(/\p{Cf}/gu, "")
 
 const countsOf = (body, pattern, extract) => {
   const counts = new Map()
@@ -265,7 +273,7 @@ const uninventoriable = []
 for (const absolute of csharpFiles(sourceRoot)) {
   const path = toPosix(absolute)
   // Decoded once, before any pattern runs, so every check below sees the identifiers the compiler sees.
-  const body = decodeIdentifierEscapes(readFileSync(absolute, "utf8"))
+  const body = normalizeIdentifiers(readFileSync(absolute, "utf8"))
   const pragmas = countsOf(body, PRAGMA, pragmaRules)
   const attributes = countsOf(body, SUPPRESS_MESSAGE, (match) => [match[1]])
 
