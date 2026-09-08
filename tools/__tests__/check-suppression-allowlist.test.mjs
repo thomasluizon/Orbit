@@ -334,28 +334,62 @@ test("a SuppressMessage whose check id is not a literal is REFUSED, not skipped"
     }),
   )
   assert.equal(result.status, 1)
-  assert.match(result.stderr, /ConstTools\.cs uses SuppressMessage 1 time\(s\) and only 0 carried a readable check id/)
+  assert.match(result.stderr, /ConstTools\.cs mentions SuppressMessage 1 time\(s\) and only 0 of them read as an attribute with a literal check id/)
   assert.match(result.stderr, /refused rather than skipped/)
 })
 
-test("a using alias for SuppressMessage is REFUSED, because no regex can resolve it", () => {
+/**
+ * The alias grammar, and the reason this is now an INVARIANT rather than a list of spellings. Three
+ * rounds were spent adding one more form each time; C#'s using-alias grammar carries an optional
+ * `global` modifier, an optional `global::` qualifier, arbitrary whitespace, and can span lines, so
+ * enumerating it was never going to terminate. Every mention of the identifier that does not read as an
+ * attribute with a literal check id is refused, whatever produced it.
+ *
+ * The first two forms below are the ones review found. The last two were never predicted and are
+ * covered by the same invariant, which is the point.
+ */
+const aliasCase = (label, aliasLines) => {
+  test(`${label} is REFUSED by the mention invariant`, () => {
+    const result = run(
+      stage(label.replaceAll(/[^a-z]/gi, "-"), {
+        pragmas: DECLARED_AUTH_SESSION,
+        sources: {
+          "src/Orbit.Infrastructure/Services/AuthSessionService.cs": ["#pragma warning disable ORBIT0004", "#pragma warning restore ORBIT0004", ""].join("\n"),
+          "src/Orbit.Api/Mcp/Tools/AliasTools.cs": [
+            ...aliasLines,
+            '[SM("Major Code Smell", "S107:Methods should not have too many parameters")]',
+            "public void Tool() { }",
+            "",
+          ].join("\n"),
+        },
+      }),
+    )
+    assert.equal(result.status, 1, result.stdout)
+    assert.match(result.stderr, /AliasTools\.cs mentions SuppressMessage \d+ time\(s\)/)
+    assert.match(result.stderr, /Use the attribute's own name with literal arguments/)
+  })
+}
+
+aliasCase("an ordinary using alias", ["using SM = System.Diagnostics.CodeAnalysis.SuppressMessageAttribute;"])
+aliasCase("a global using alias", ["global using SM = System.Diagnostics.CodeAnalysis.SuppressMessageAttribute;"])
+aliasCase("an alias through the global:: qualifier", ["using SM = global::System.Diagnostics.CodeAnalysis.SuppressMessageAttribute;"])
+aliasCase("an alias split across lines", ["using SM =", "    System.Diagnostics.CodeAnalysis.SuppressMessageAttribute;"])
+aliasCase("an alias to the short attribute name", ["using SM = System.Diagnostics.CodeAnalysis.SuppressMessage;"])
+
+test("a mention the extractor cannot read is refused even with no attribute use at all", () => {
+  // A comment naming the attribute fails too. That is a fail-CLOSED false positive with a visible
+  // remedy, and it is the deliberate trade: nothing has to be predicted for the set to stay closed.
   const result = run(
-    stage("attribute-alias", {
+    stage("mention-in-comment", {
       pragmas: DECLARED_AUTH_SESSION,
       sources: {
         "src/Orbit.Infrastructure/Services/AuthSessionService.cs": ["#pragma warning disable ORBIT0004", "#pragma warning restore ORBIT0004", ""].join("\n"),
-        "src/Orbit.Api/Mcp/Tools/AliasTools.cs": [
-          "using SM = System.Diagnostics.CodeAnalysis.SuppressMessageAttribute;",
-          '[SM("Major Code Smell", "S107:Methods should not have too many parameters")]',
-          "public void Tool() { }",
-          "",
-        ].join("\n"),
+        "src/Orbit.Api/Mcp/Tools/MentionTools.cs": ["// consider a SuppressMessage here one day", "public void Tool() { }", ""].join("\n"),
       },
     }),
   )
   assert.equal(result.status, 1)
-  assert.match(result.stderr, /AliasTools\.cs declares a using alias for SuppressMessage/)
-  assert.match(result.stderr, /Use the attribute's own name/)
+  assert.match(result.stderr, /MentionTools\.cs mentions SuppressMessage 1 time\(s\) and only 0 of them read as an attribute/)
 })
 
 test("an empty reason is a data error, so an entry cannot be filled in without writing one", () => {

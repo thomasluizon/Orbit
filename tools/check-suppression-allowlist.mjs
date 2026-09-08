@@ -134,15 +134,27 @@ const ALL_WARNINGS = "(all warnings)"
  * the shape all seven live attributes take. `Attribute` is optional in C# attribute syntax, so
  * `[SuppressMessageAttribute(...)]` is the same attribute.
  */
-const SUPPRESS_MESSAGE_ANY = /\bSuppressMessage(?:Attribute)?\s*\(/g
 const SUPPRESS_MESSAGE = /\bSuppressMessage(?:Attribute)?\s*\(\s*"[^"]*"\s*,\s*"([A-Za-z]+\d+)[:"]/g
 /**
- * A `using` alias can rename the attribute to anything, and no regex can resolve an arbitrary alias to
- * the attribute it names. So the alias DECLARATION is what gets caught: a file that declares one cannot
- * be inventoried reliably, and it is refused rather than scanned. Same for a check id that is not a
- * string literal, which the strict pattern above cannot read.
+ * EVERY mention of the identifier, and this is an INVARIANT rather than a list of spellings.
+ *
+ * Three review rounds were spent adding one more alias or attribute form each time: the long
+ * `Attribute` spelling, a `const string` check id, an ordinary `using` alias, then
+ * `global using SM = ...` and `using SM = global::...`. That is an open set defended by guesswork,
+ * which is the exact antipattern this whole gate exists to reject, and enumerating C#'s using-alias
+ * grammar was never going to terminate: the alias can carry a `global` modifier, a `global::`
+ * qualifier, arbitrary whitespace, and can span lines.
+ *
+ * So the rule is inverted. Every mention of `SuppressMessage` or `SuppressMessageAttribute` under
+ * `src/` must be accounted for by an attribute use the strict pattern above could read into a declared
+ * site. A surplus mention is REFUSED, whatever produced it: an alias directive in any spelling, a
+ * check id that is not a literal, a form nobody has thought of yet. Nothing has to be predicted.
+ *
+ * Measured on the live tree before adopting it: 7 mentions in 3 files, 7 extracted, so the invariant
+ * holds today with no false positive. A mention inside a comment or a string would fail it, which is a
+ * fail-CLOSED false positive with a visible remedy rather than a silent pass.
  */
-const SUPPRESS_MESSAGE_ALIAS = /^[^\S\n]*using\s+[A-Za-z_]\w*\s*=\s*[\w.]*SuppressMessage(?:Attribute)?\s*;/gm
+const SUPPRESS_MESSAGE_TOKEN = /\bSuppressMessage(?:Attribute)?\b/g
 
 const pragmaRules = (match) => {
   const ids = match[1]
@@ -232,14 +244,13 @@ for (const absolute of csharpFiles(sourceRoot)) {
   const pragmas = countsOf(body, PRAGMA, pragmaRules)
   const attributes = countsOf(body, SUPPRESS_MESSAGE, (match) => [match[1]])
 
-  for (const _alias of body.matchAll(SUPPRESS_MESSAGE_ALIAS)) {
-    uninventoriable.push(`${path} declares a using alias for SuppressMessage. This gate cannot resolve an alias to the attribute it names, so it refuses the file rather than reporting zero sites. Use the attribute's own name.`)
-  }
-  const found = [...body.matchAll(SUPPRESS_MESSAGE_ANY)].length
+  const mentions = [...body.matchAll(SUPPRESS_MESSAGE_TOKEN)].length
   const extracted = [...attributes.values()].reduce((total, count) => total + count, 0)
-  if (found > extracted) {
+  if (mentions > extracted) {
     uninventoriable.push(
-      `${path} uses SuppressMessage ${found} time(s) and only ${extracted} carried a readable check id. An id that is not a string literal cannot be inventoried, so it is refused rather than skipped.`,
+      `${path} mentions SuppressMessage ${mentions} time(s) and only ${extracted} of them read as an attribute with a literal check id. ` +
+        "The surplus cannot be inventoried, so it is refused rather than skipped. A using alias in any spelling, a check id that is not a string literal, " +
+        "and a mention in a comment or a string all land here. Use the attribute's own name with literal arguments, or remove the mention.",
     )
   }
   const generatedPrefix = [...generatedRules.keys()].find((prefix) => path.startsWith(prefix))
