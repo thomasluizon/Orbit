@@ -35,7 +35,7 @@ public sealed partial class AiUsageRecorder(
         Guid? userId = null)
     {
         var costUsd = ComputeCostUsd(_pricing.GetValueOrDefault(model), cachedTokens, promptTokens, completionTokens);
-#pragma warning disable ORBIT0004 // WHY: pre-existing deliberate UTC-date window or UTC-keyed dedupe/aggregation bucket (not a user's calendar date), per-site justification ledger: https://github.com/thomasluizon/orbit-api/issues/431
+#pragma warning disable ORBIT0004
         var date = DateOnly.FromDateTime(DateTime.UtcNow);
 #pragma warning restore ORBIT0004
 

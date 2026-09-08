@@ -30,7 +30,7 @@ public class AuthSessionService(
     public async Task<Result<SessionTokens>> CreateSessionAsync(Guid userId, string email, CancellationToken cancellationToken = default)
     {
         var refreshToken = GenerateRefreshToken();
-#pragma warning disable ORBIT0004 // WHY: pre-existing deliberate UTC instant (expiry/TTL/cutoff math, not a user-facing date), per-site justification ledger: https://github.com/thomasluizon/orbit-api/issues/431
+#pragma warning disable ORBIT0004
         var nowUtc = DateTime.UtcNow;
 #pragma warning restore ORBIT0004
         var sessionResult = UserSession.Create(
@@ -51,7 +51,7 @@ public class AuthSessionService(
 
     public async Task<Result<SessionTokens>> RefreshSessionAsync(string refreshToken, CancellationToken cancellationToken = default)
     {
-#pragma warning disable ORBIT0004 // WHY: pre-existing deliberate UTC instant (expiry/TTL/cutoff math, not a user-facing date), per-site justification ledger: https://github.com/thomasluizon/orbit-api/issues/431
+#pragma warning disable ORBIT0004
         var nowUtc = DateTime.UtcNow;
 #pragma warning restore ORBIT0004
         var tokenHash = HashToken(refreshToken);
@@ -101,7 +101,7 @@ public class AuthSessionService(
         if (session is null)
             return Result.Failure(ErrorMessages.InvalidSession);
 
-#pragma warning disable ORBIT0004 // WHY: pre-existing deliberate UTC instant (expiry/TTL/cutoff math, not a user-facing date), per-site justification ledger: https://github.com/thomasluizon/orbit-api/issues/431
+#pragma warning disable ORBIT0004
         session.Revoke(DateTime.UtcNow);
 #pragma warning restore ORBIT0004
         await unitOfWork.SaveChangesAsync(cancellationToken);
@@ -114,7 +114,7 @@ public class AuthSessionService(
         if (userId == Guid.Empty)
             return Result.Failure(DomainErrors.UserIdRequired);
 
-#pragma warning disable ORBIT0004 // WHY: pre-existing deliberate UTC instant (expiry/TTL/cutoff math, not a user-facing date), per-site justification ledger: https://github.com/thomasluizon/orbit-api/issues/431
+#pragma warning disable ORBIT0004
         var nowUtc = DateTime.UtcNow;
 #pragma warning restore ORBIT0004
 
@@ -146,7 +146,7 @@ public class AuthSessionService(
 
     public async Task<bool> HasSessionForTokenAsync(string refreshToken, CancellationToken cancellationToken = default)
     {
-#pragma warning disable ORBIT0004 // WHY: pre-existing deliberate UTC instant (expiry/TTL/cutoff math, not a user-facing date), per-site justification ledger: https://github.com/thomasluizon/orbit-api/issues/431
+#pragma warning disable ORBIT0004
         var nowUtc = DateTime.UtcNow;
 #pragma warning restore ORBIT0004
         var tokenHash = HashToken(refreshToken);
