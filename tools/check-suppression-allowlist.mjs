@@ -164,6 +164,30 @@ const pragmaRules = (match) => {
   return ids.length === 0 ? [ALL_WARNINGS] : ids
 }
 
+/**
+ * C# permits Unicode escape sequences INSIDE an identifier, so `SuppressMessage` is the same
+ * identifier as `SuppressMessage` and a text scanner reading the raw bytes sees neither. Verified:
+ * against the raw source the mention invariant counts 0, against the decoded source it counts 1.
+ *
+ * Decoding the whole file once closes the entire escape family rather than one instance, which is the
+ * lesson of the four rounds before it. The compiler performs the same normalization, so this is not a
+ * heuristic. Checked against the only file under `src/` that already carries escapes,
+ * `CheckReferralCompletionCommand.cs`: its nine escapes decode to Portuguese accented characters and
+ * the mention count is 0 both before and after, so decoding invents nothing.
+ *
+ * THE CEILING, said plainly rather than left implied. A text scanner cannot be closed against a
+ * DETERMINED author. Escapes are closed here, and the verbatim `@SuppressMessage` spelling is already
+ * matched because `@` is not a word character, but source generators, a partial class assembled across
+ * files, and forms nobody has thought of remain outside what reading source text can prove. This gate
+ * closes the set against accident and against convenience, which is what actually happens in this
+ * repository. Real closure needs resolved symbols: a Roslyn analyzer, or an inventory taken from
+ * `dotnet build` warning output. That is a bigger change than this ticket and it is worth its own.
+ */
+const decodeIdentifierEscapes = (source) =>
+  source
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_match, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/\\U([0-9a-fA-F]{8})/g, (_match, hex) => String.fromCodePoint(parseInt(hex, 16)))
+
 const countsOf = (body, pattern, extract) => {
   const counts = new Map()
   for (const match of body.matchAll(pattern)) {
@@ -240,7 +264,8 @@ const uninventoriable = []
 
 for (const absolute of csharpFiles(sourceRoot)) {
   const path = toPosix(absolute)
-  const body = readFileSync(absolute, "utf8")
+  // Decoded once, before any pattern runs, so every check below sees the identifiers the compiler sees.
+  const body = decodeIdentifierEscapes(readFileSync(absolute, "utf8"))
   const pragmas = countsOf(body, PRAGMA, pragmaRules)
   const attributes = countsOf(body, SUPPRESS_MESSAGE, (match) => [match[1]])
 

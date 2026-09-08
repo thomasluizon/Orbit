@@ -392,6 +392,64 @@ test("a mention the extractor cannot read is refused even with no attribute use 
   assert.match(result.stderr, /MentionTools\.cs mentions SuppressMessage 1 time\(s\) and only 0 of them read as an attribute/)
 })
 
+/**
+ * C# permits Unicode escape sequences inside an identifier, so the attribute name can be spelled with
+ * an escaped character and remain the same attribute to the compiler. Decoding the file once closes the
+ * whole escape family rather than this one instance. `ESCAPED_ATTRIBUTE` writes `r` as r through a
+ * char code, so this source file carries no escape of its own to be confused by.
+ */
+const ESCAPED_ATTRIBUTE = `[System.Diagnostics.CodeAnalysis.Supp\\u00${(0x72).toString(16)}essMessage("Major Code Smell", "S107:Methods should not have too many parameters")]`
+const AUTH_SESSION_SOURCE = ["#pragma warning disable ORBIT0004", "#pragma warning restore ORBIT0004", ""].join("\n")
+
+test("the escaped spelling really is invisible to a raw text scan, so this case is not vacuous", () => {
+  assert.equal(/\bSuppressMessage\b/.test(ESCAPED_ATTRIBUTE), false)
+  assert.match(ESCAPED_ATTRIBUTE, /Supp\\u0072essMessage/)
+})
+
+test("an identifier escape in the attribute name is decoded, not walked past", () => {
+  const result = run(
+    stage("identifier-escape", {
+      pragmas: DECLARED_AUTH_SESSION,
+      sources: {
+        "src/Orbit.Infrastructure/Services/AuthSessionService.cs": AUTH_SESSION_SOURCE,
+        "src/Orbit.Api/Mcp/Tools/EscapedTools.cs": [ESCAPED_ATTRIBUTE, "public void Tool() { }", ""].join("\n"),
+      },
+    }),
+  )
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /EscapedTools\.cs carries \[SuppressMessage\] for S107 and is not in the allowlist/)
+})
+
+test("a declared escaped attribute passes, so decoding feeds the extractor and not only the invariant", () => {
+  const result = run(
+    stage("identifier-escape-declared", {
+      pragmas: DECLARED_AUTH_SESSION,
+      suppressMessage: { "src/Orbit.Api/Mcp/Tools/EscapedTools.cs": { S107: { count: 1, reason: "the MCP SDK requires individually annotated parameters." } } },
+      sources: {
+        "src/Orbit.Infrastructure/Services/AuthSessionService.cs": AUTH_SESSION_SOURCE,
+        "src/Orbit.Api/Mcp/Tools/EscapedTools.cs": [ESCAPED_ATTRIBUTE, "public void Tool() { }", ""].join("\n"),
+      },
+    }),
+  )
+  assert.equal(result.status, 0, result.stderr)
+})
+
+test("an escape that decodes to something harmless does not invent a mention", () => {
+  // The one live file carrying escapes decodes to Portuguese accented characters. Decoding must not
+  // manufacture a finding out of ordinary text.
+  const accented = `const string Message = "conclus\\u00e3o da refer\\u00eancia";`
+  const result = run(
+    stage("harmless-escape", {
+      pragmas: DECLARED_AUTH_SESSION,
+      sources: {
+        "src/Orbit.Infrastructure/Services/AuthSessionService.cs": AUTH_SESSION_SOURCE,
+        "src/Orbit.Application/Referrals/Accents.cs": [accented, ""].join("\n"),
+      },
+    }),
+  )
+  assert.equal(result.status, 0, result.stderr)
+})
+
 test("an empty reason is a data error, so an entry cannot be filled in without writing one", () => {
   const result = run(stage("empty-reason", { pragmas: { "src/Orbit.Infrastructure/Services/AuthSessionService.cs": { ORBIT0004: { count: 1, reason: "   " } } } }))
   assert.equal(result.status, 2)
