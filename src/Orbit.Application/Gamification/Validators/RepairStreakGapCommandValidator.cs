@@ -15,11 +15,10 @@ public class RepairStreakGapCommandValidator : AbstractValidator<RepairStreakGap
             .WithMessage("The gap exceeds the streak history window.")
             .Must(dates => dates.All(date => date != DateOnly.MinValue))
             .WithMessage("Each date is required.")
-            .Must(dates =>
-            {
-                var ordered = dates.Order().ToArray();
-                return ordered.Select((date, index) => date.DayNumber == ordered[0].DayNumber + index).All(valid => valid);
-            })
-            .WithMessage("Select consecutive dates without duplicates.");
+            // Duplicates only. Contiguity is a property of the user's SCHEDULE, not of the calendar, so
+            // it is enforced in UserStreakService where the scheduled occurrences are known. Asserting
+            // calendar-consecutiveness at this boundary rejected every valid weekly and every-N-day gap.
+            .Must(dates => dates.Distinct().Count() == dates.Count)
+            .WithMessage("Select each date once.");
     }
 }

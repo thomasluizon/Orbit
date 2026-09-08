@@ -16,10 +16,15 @@ public class StreakFreeze : Entity
         if (userId == Guid.Empty || dates is null || dates.Count == 0)
             return Result.Failure<IReadOnlyList<StreakFreeze>>(DomainErrors.InvalidStreakGap);
 
+        // Calendar-consecutiveness is NOT asserted here. A gap is contiguous over the user's SCHEDULED
+        // occurrences, and this entity cannot see a schedule, so requiring consecutive calendar days
+        // rejected every valid weekly and every-N-day gap before the schedule was ever loaded.
+        // UserStreakService enforces the real contiguity against `expectedDates`. What survives here is
+        // what a date list alone can prove: real dates, no duplicates, and ending local yesterday.
         var ordered = dates.Order().ToArray();
         if (ordered[0] == DateOnly.MinValue
             || ordered[^1].DayNumber != userToday.DayNumber - 1
-            || ordered.Where((date, index) => date.DayNumber != ordered[0].DayNumber + index).Any())
+            || ordered.Where((date, index) => index > 0 && date == ordered[index - 1]).Any())
         {
             return Result.Failure<IReadOnlyList<StreakFreeze>>(DomainErrors.InvalidStreakGap);
         }

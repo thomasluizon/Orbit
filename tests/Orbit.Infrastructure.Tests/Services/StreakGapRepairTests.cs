@@ -251,6 +251,32 @@ public class StreakGapRepairTests
         (await Evaluate()).Should().BeNull();
     }
 
+    /// <summary>
+    /// The sparse-schedule case the calendar-adjacency reading could never repair. A weekly habit's
+    /// prior contributing occurrence is seven days back, so requiring activity on the previous CALENDAR
+    /// day made every weekly gap unavailable: that day is not scheduled and carries nothing.
+    /// </summary>
+    [Fact]
+    public async Task WeeklyGapWhosePriorOccurrenceIsAWeekBack_IsRepairable()
+    {
+        _habit = SetWeeklyHistory();
+
+        var state = await _service.EvaluateGapRepairAsync(_user.Id, _today, [_today.AddDays(-1)]);
+
+        state.Should().NotBeNull();
+        state!.CurrentStreak.Should().BeGreaterThan(0);
+    }
+
+    /// <summary>Schedule-awareness widens which gaps are contiguous; it never waives the preceding
+    /// occurrence. With the prior week's occurrence missed too, one selected date is not a whole gap.</summary>
+    [Fact]
+    public async Task WeeklyGapWhosePriorOccurrenceWasAlsoMissed_IsUnavailable()
+    {
+        _habit = SetWeeklyHistory(priorOccurrences: 3, skipMostRecentCompletion: true);
+
+        (await _service.EvaluateGapRepairAsync(_user.Id, _today, [_today.AddDays(-1)])).Should().BeNull();
+    }
+
     [Fact]
     public async Task GapExceedsMonthlyAllowance_IsUnavailable()
     {
@@ -308,6 +334,30 @@ public class StreakGapRepairTests
 
     private Task<UserStreakState?> Evaluate() =>
         _service.EvaluateGapRepairAsync(_user.Id, _today, [_today.AddDays(-2), _today.AddDays(-1)]);
+
+    /// <summary>
+    /// A weekly habit whose occurrences land on yesterday and every seventh day before it. Yesterday is
+    /// missed; the earlier occurrences are completed unless <paramref name="skipMostRecentCompletion"/>
+    /// leaves the one directly before the gap missed too.
+    /// </summary>
+    private Habit SetWeeklyHistory(int priorOccurrences = 3, bool skipMostRecentCompletion = false)
+    {
+        var firstOccurrence = _today.AddDays(-1 - (7 * priorOccurrences));
+        var habit = Habit.Create(new HabitCreateParams(_user.Id, "Long run", FrequencyUnit.Week, 1,
+            DueDate: firstOccurrence)).Value;
+        typeof(Habit).GetProperty(nameof(Habit.CreatedAtUtc))!.SetValue(habit,
+            firstOccurrence.ToDateTime(new TimeOnly(12, 0), DateTimeKind.Utc));
+        for (var week = 0; week < priorOccurrences; week++)
+        {
+            if (skipMostRecentCompletion && week == priorOccurrences - 1)
+                continue;
+            habit.Log(firstOccurrence.AddDays(7 * week), advanceDueDate: false);
+        }
+        _habits.FindAsync(Arg.Any<Expression<Func<Habit, bool>>>(), Arg.Any<CancellationToken>()).Returns([habit]);
+        _logs.FindAsync(Arg.Any<Expression<Func<HabitLog, bool>>>(), Arg.Any<CancellationToken>())
+            .Returns(call => habit.Logs.Where(call.Arg<Expression<Func<HabitLog, bool>>>().Compile()).ToList());
+        return habit;
+    }
 
     private Habit SetHistory(DateOnly today, int gapLength, int frequencyQuantity = 1, int precedingCompletions = 3)
     {

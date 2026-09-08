@@ -113,7 +113,25 @@ public class UserStreakService(
         if (dates.Any(date => !expectedDates.Contains(date) || completions.Contains(date) || freezes.Contains(date)))
             return null;
 
-        var precedingDate = gapStart.AddDays(-1);
+        // Streak continuity runs over SCHEDULED occurrences, never calendar days: a weekly habit's
+        // streak survives the six unscheduled days between two occurrences. Reading the calendar day
+        // before the gap made every weekly and every-N-day gap unrepairable, because that day is
+        // usually not scheduled and so carries neither a completion nor a freeze.
+        var scheduled = expectedDates.Order().ToArray();
+        var gapStartIndex = Array.IndexOf(scheduled, gapStart);
+        if (gapStartIndex <= 0)
+            return null;
+
+        // The selection must be an unbroken run of scheduled occurrences, so a caller cannot omit a
+        // missed occurrence inside the gap and claim the streak carried across it.
+        var orderedDates = dates.Order().ToArray();
+        if (gapStartIndex + orderedDates.Length > scheduled.Length
+            || orderedDates.Where((date, index) => date != scheduled[gapStartIndex + index]).Any())
+        {
+            return null;
+        }
+
+        var precedingDate = scheduled[gapStartIndex - 1];
         if (!completions.Contains(precedingDate) && !freezes.Contains(precedingDate))
             return null;
 
