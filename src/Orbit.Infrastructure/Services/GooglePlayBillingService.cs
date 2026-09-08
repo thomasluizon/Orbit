@@ -66,7 +66,8 @@ public sealed class GooglePlayBillingService(
             resolvedProductId,
             purchase.LinkedPurchaseToken,
             purchase.ExternalAccountIdentifiers?.ObfuscatedExternalAccountId,
-            lineItem?.OfferDetails?.OfferId);
+            lineItem?.OfferDetails?.OfferId,
+            purchase.SubscriptionState == "SUBSCRIPTION_STATE_IN_GRACE_PERIOD");
     }
 
     public async Task AcknowledgeAsync(string productId, string purchaseToken, CancellationToken cancellationToken)

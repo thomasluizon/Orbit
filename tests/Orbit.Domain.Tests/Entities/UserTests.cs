@@ -343,6 +343,28 @@ public class UserTests
         user.IsPro.Should().BeTrue();
     }
 
+    [Theory]
+    [InlineData(true, SubscriptionLapseReason.PaymentFailed)]
+    [InlineData(false, null)]
+    public void SetPlaySubscription_AfterPaymentFailure_SetsReasonFromCurrentState(
+        bool isInGracePeriod, SubscriptionLapseReason? expectedReason)
+    {
+        var user = CreateValidUser();
+        var expiresAt = DateTime.UtcNow.AddDays(30);
+        user.SetPlaySubscription("play_token_123", expiresAt, SubscriptionInterval.Monthly);
+        user.CancelPlaySubscription(SubscriptionLapseReason.PaymentFailed);
+
+        user.SetPlaySubscription("play_token_123", expiresAt, SubscriptionInterval.Monthly, isInGracePeriod);
+
+        user.IsPro.Should().BeTrue();
+        user.HasProAccess.Should().BeTrue();
+        user.SubscriptionSource.Should().Be(SubscriptionSource.GooglePlay);
+        user.SubscriptionLapseReason.Should().Be(expectedReason);
+        user.SubscriptionEndedAtUtc.Should().BeNull();
+        user.PlayPurchaseToken.Should().Be("play_token_123");
+        user.PlanExpiresAt.Should().Be(expiresAt);
+    }
+
     [Fact]
     public void CancelPlaySubscription_WhenPlayIsSource_ClearsEntitlementAndToken()
     {
