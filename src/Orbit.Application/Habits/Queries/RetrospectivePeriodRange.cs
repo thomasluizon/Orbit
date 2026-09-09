@@ -25,10 +25,10 @@ public static class RetrospectivePeriodRange
         var dateFrom = normalized switch
         {
             "week" => WeekMath.WeekStart(today, weekStartDay),
-            "month" => today.AddDays(-30),
-            "quarter" => today.AddDays(-90),
-            "semester" => today.AddDays(-180),
-            "year" => today.AddDays(-365),
+            "month" => today.AddDays(-29),
+            "quarter" => today.AddDays(-89),
+            "semester" => today.AddDays(-179),
+            "year" => today.AddDays(-364),
             _ => throw new ArgumentOutOfRangeException(nameof(period), period, "Unknown retrospective period.")
         };
 

@@ -21,6 +21,20 @@ public class RetrospectivePeriodRangeTests
         dateFrom.Should().BeOnOrBefore(Today);
     }
 
+    [Theory]
+    [InlineData("month", 30)]
+    [InlineData("quarter", 90)]
+    [InlineData("semester", 180)]
+    [InlineData("year", 365)]
+    public void Resolve_RollingPeriod_SpansExpectedDateCount(string period, int expectedDateCount)
+    {
+        var (dateFrom, dateTo) = RetrospectivePeriodRange.Resolve(period, Today, weekStartDay: 1);
+
+        var dateCount = dateTo.DayNumber - dateFrom.DayNumber + 1;
+
+        dateCount.Should().Be(expectedDateCount);
+    }
+
     [Fact]
     public void Resolve_UnknownPeriod_Throws()
     {
