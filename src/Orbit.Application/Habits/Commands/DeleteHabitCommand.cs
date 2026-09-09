@@ -22,6 +22,25 @@ public class DeleteHabitCommandHandler(
 {
     public async Task<Result> Handle(DeleteHabitCommand request, CancellationToken cancellationToken)
     {
+        // A soft delete removes occurrences from the schedule a streak repair decides eligibility
+        // from, so it commits inside HabitCeilingLock like every other writer of that state.
+        var result = await HabitCeilingLock.ExecuteAsync(
+            unitOfWork,
+            request.UserId,
+            transactionToken => DeleteSubtreeAsync(request, transactionToken),
+            cancellationToken);
+
+        if (result.IsFailure)
+            return result;
+
+        var today = await userDateService.GetUserTodayAsync(request.UserId, cancellationToken);
+        CacheInvalidationHelper.InvalidateUserAiCaches(cache, request.UserId, today);
+
+        return Result.Success();
+    }
+
+    private async Task<Result> DeleteSubtreeAsync(DeleteHabitCommand request, CancellationToken cancellationToken)
+    {
         var habit = await habitRepository.GetByIdAsync(request.HabitId, cancellationToken);
 
         if (habit is null)
@@ -48,9 +67,6 @@ public class DeleteHabitCommandHandler(
             unitOfWork,
             ct => userStreakService.RecalculateAsync(request.UserId, cancellationToken: ct),
             cancellationToken);
-
-        var today = await userDateService.GetUserTodayAsync(request.UserId, cancellationToken);
-        CacheInvalidationHelper.InvalidateUserAiCaches(cache, request.UserId, today);
 
         return Result.Success();
     }

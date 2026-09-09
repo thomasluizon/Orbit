@@ -9,6 +9,7 @@ using Orbit.Domain.Entities;
 using Orbit.Domain.Enums;
 using Orbit.Domain.Interfaces;
 using System.Linq.Expressions;
+using Orbit.Application.Tests.Common;
 
 namespace Orbit.Application.Tests.Commands.Habits;
 
@@ -28,6 +29,7 @@ public class SkipHabitCommandHandlerTests
 
     public SkipHabitCommandHandlerTests()
     {
+        _unitOfWork.PassThroughTransactions<Result>();
         _handler = new SkipHabitCommandHandler(
             new SkipHabitRepositories(_habitRepo, _habitLogRepo), _userDateService,
             _goalCompletionService, _unitOfWork, _cache);

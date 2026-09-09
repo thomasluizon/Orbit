@@ -37,10 +37,13 @@ public class RepairStreakGapCommandHandler(
          * fires. A cadence or due-date change landing between the two left a freeze spent on a date the
          * committed schedule no longer accepts, with the bank charged all the same.
          *
-         * HabitCeilingLock is that boundary and it already exists: UpdateHabitCommand, LogHabitCommand,
-         * CreateHabitCommand, MoveHabitParentCommand and RestoreHabitCommand all take the same per-user
-         * advisory lock inside a transaction. Joining it serializes the repair against every writer
-         * whose output it reads, rather than inventing a second mechanism beside the one already in use.
+         * HabitCeilingLock is that boundary, and this change extends it to cover every writer rather
+         * than only the ceiling-sensitive ones it already held. Create, update, move, restore, log,
+         * unlog, delete, skip, their four bulk twins, the yesterday repair, the chat tools' single
+         * commit point and the offline-sync delete replay now all persist inside it. A writer only has
+         * to hold it across the save, because the lock is transaction scoped and what it serializes is
+         * the interval from acquisition to commit.
+         *
          * The user is loaded INSIDE the lock for the same reason: a load taken before it would carry a
          * pre-lock snapshot of the bank into a post-lock decision.
          */

@@ -4,7 +4,22 @@ using Orbit.Domain.Entities;
 
 namespace Orbit.Application.Common;
 
-internal static class HabitCeilingLock
+/// <summary>
+/// THE per-user consistency boundary for habit schedule, completion and freeze-currency state.
+///
+/// Two kinds of caller take it. A writer takes it so its persisted mutation cannot land inside
+/// another caller's read-then-write interval. A reader-then-writer, such as the habit ceiling check
+/// or a streak repair that spends banked freezes, takes it so nothing changes the inputs it decided
+/// from before it commits. The guarantee only holds while BOTH sides take it, so a handler that
+/// persists a change to a habit's schedule, to a completion log, or to the freeze bank belongs
+/// inside it. <c>User.xmin</c> does not cover the gap: a schedule-only habit edit commits without
+/// touching the user row, so the optimistic token never fires.
+///
+/// The lock is a transaction-scoped PostgreSQL advisory lock, so what it serializes is the interval
+/// from acquisition to commit. A writer therefore only needs to hold it across the save that
+/// persists the change, not across derived work that follows.
+/// </summary>
+public static class HabitCeilingLock
 {
     public static string ForUser(Guid userId) => $"habit-ceiling:{userId}";
 
@@ -23,6 +38,17 @@ internal static class HabitCeilingLock
         {
             await AcquireAsync(unitOfWork, userId, transactionToken);
             return await operation(transactionToken);
+        }, cancellationToken);
+
+    public static Task ExecuteAsync(
+        IUnitOfWork unitOfWork,
+        Guid userId,
+        Func<CancellationToken, Task> operation,
+        CancellationToken cancellationToken) =>
+        unitOfWork.ExecuteInTransactionAsync(async transactionToken =>
+        {
+            await AcquireAsync(unitOfWork, userId, transactionToken);
+            await operation(transactionToken);
         }, cancellationToken);
 
     public static Task<Result> ExecuteEntryAsync<TState>(

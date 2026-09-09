@@ -13,6 +13,7 @@ using Orbit.Domain.Common;
 using Orbit.Domain.Entities;
 using Orbit.Domain.Interfaces;
 using Orbit.Domain.Models;
+using Orbit.Application.Tests.Common;
 
 namespace Orbit.Application.Tests.Commands.Gamification;
 
@@ -34,6 +35,7 @@ public class RepairStreakCommandHandlerTests
 
     public RepairStreakCommandHandlerTests()
     {
+        _unitOfWork.PassThroughTransactions<Result>();
         _handler = new RepairStreakCommandHandler(
             _userRepository,
             _freezeRepository,
