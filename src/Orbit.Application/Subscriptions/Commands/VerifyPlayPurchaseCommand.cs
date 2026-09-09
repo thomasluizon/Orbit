@@ -78,7 +78,7 @@ public partial class VerifyPlayPurchaseCommandHandler(
             return linkResult;
         }
 
-        user.SetPlaySubscription(request.PurchaseToken, state.ExpiresAt, state.Interval);
+        user.SetPlaySubscription(request.PurchaseToken, state.ExpiresAt, state.Interval, state.IsInGracePeriod);
         var verifyResult = await SavePlayTokenAsync(request, user, cancellationToken);
         if (verifyResult.IsSuccess)
         {

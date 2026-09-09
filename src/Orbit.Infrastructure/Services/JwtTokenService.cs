@@ -27,7 +27,7 @@ public class JwtTokenService(IOptions<JwtSettings> options) : ITokenService
         var descriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(claims),
-#pragma warning disable ORBIT0004 // WHY: pre-existing deliberate UTC instant (expiry/TTL/cutoff math, not a user-facing date), per-site justification ledger: https://github.com/thomasluizon/orbit-api/issues/431
+#pragma warning disable ORBIT0004
             Expires = DateTime.UtcNow.Add(
 #pragma warning restore ORBIT0004
                 _settings.ExpiryMinutes > 0

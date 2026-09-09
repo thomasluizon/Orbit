@@ -57,7 +57,7 @@ public partial class HabitDueDateAdvancementService(
     }
 
     internal static DateOnly ConservativeCutoffUtc() =>
-#pragma warning disable ORBIT0004 // WHY: pre-existing deliberate UTC-date window or UTC-keyed dedupe/aggregation bucket (not a user's calendar date), per-site justification ledger: https://github.com/thomasluizon/orbit-api/issues/431
+#pragma warning disable ORBIT0004
         DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-1));
 #pragma warning restore ORBIT0004
 
