@@ -99,11 +99,13 @@ public class RepairStreakGapConcurrencyTests
         var repair = repairHandler.Handle(new(_user.Id, Dates), CancellationToken.None);
         await stagedFreeze.Task.WaitAsync(Timeout);
         var delete = deleteHandler.Handle(new(_user.Id, habit.Id), CancellationToken.None);
-        // Bounded, so a delete that takes no lock fails this test in seconds instead of hanging it.
+        /** Bounded, so a delete that takes no lock fails this test in seconds instead of hanging it. */
         await _unitOfWork.SecondLockRequested.Task.WaitAsync(Timeout);
 
-        // The repair is parked between its eligibility read and its spend. The delete has asked for
-        // the lock and is holding, so it has not even LOADED the habit, let alone soft-deleted it.
+        /**
+         * The repair is parked between its eligibility read and its spend. The delete has asked for
+         * the lock and is holding, so it has not even LOADED the habit, let alone soft-deleted it.
+         */
         delete.IsCompleted.Should().BeFalse();
         _unitOfWork.Order.Should().NotContain("delete:load");
         habit.IsDeleted.Should().BeFalse();
