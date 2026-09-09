@@ -51,16 +51,20 @@ public class RepairStreakGapCommandHandler(
         if (spent.IsFailure)
             return spent.PropagateError<StreakInfoResponse>();
 
-        // The SCHEDULED predecessor the service validated the gap against, never the previous calendar
-        // day. On a sparse cadence those differ, the cursor match then failed, and the derived-cursor
-        // fallback marked a newly crossed milestone as awarded without granting its freeze.
+        /**
+         * The SCHEDULED predecessor the service validated the gap against, never the previous calendar
+         * day. On a sparse cadence those differ, the cursor match then failed, and the derived-cursor
+         * fallback marked a newly crossed milestone as awarded without granting its freeze.
+         */
         user.RestoreStreakAfterGapRepair(state.CurrentStreak, state.LongestStreak, state.LastActiveDate,
             state.PrecedingScheduledDate ?? gap.Value[0].UsedOnDate.AddDays(-1),
             state.PreGapStreak);
-        // Restoring the cursor only makes a newly crossed milestone ELIGIBLE. Nothing else in this path
-        // grants it: the response comes from GetStreakInfoQuery, which calls CalculateAsync rather than
-        // RecalculateAsync, so an award earned by the repaired run would sit pending and be lost the
-        // next time the streak reset. The repair grants it here, in the same save that spends the bank.
+        /**
+         * Restoring the cursor only makes a newly crossed milestone ELIGIBLE. Nothing else in this path
+         * grants it: the response comes from GetStreakInfoQuery, which calls CalculateAsync rather than
+         * RecalculateAsync, so an award earned by the repaired run would sit pending and be lost the
+         * next time the streak reset. The repair grants it here, in the same save that spends the bank.
+         */
         user.AwardStreakFreezeIfEligible(
             AppConstants.MaxStreakFreezesAccumulated,
             AppConstants.StreakDaysPerFreeze);
