@@ -57,7 +57,8 @@ public partial class BulkLogHabitsCommandHandler(
             today.AddDays(-AppConstants.MaxRangeDays),
             cancellationToken);
 
-        await unitOfWork.ExecuteInTransactionAsync(async ct =>
+        /** A completion log and its due-date advance are both inputs a streak repair reads. */
+        await HabitCeilingLock.ExecuteAsync(unitOfWork, request.UserId, async ct =>
         {
             for (int i = 0; i < request.Items.Count; i++)
             {

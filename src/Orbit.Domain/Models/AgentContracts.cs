@@ -270,6 +270,7 @@ public static class AgentCapabilityIds
     public const string CalendarSyncManage = "calendar.sync.manage";
     public const string GamificationRead = "gamification.read";
     public const string GamificationRepair = "gamification.repair";
+    public const string GamificationRepairGap = "gamification.repair_gap";
     public const string ChecklistTemplatesRead = "checklist-templates.read";
     public const string ChecklistTemplatesWrite = "checklist-templates.write";
     public const string UserFactsRead = "user-facts.read";

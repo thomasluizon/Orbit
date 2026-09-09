@@ -81,6 +81,108 @@ public class UserStreakService(
             freezeDateSet);
     }
 
+    public async Task<UserStreakState?> EvaluateGapRepairAsync(
+        Guid userId,
+        DateOnly userToday,
+        IReadOnlyCollection<DateOnly> dates,
+        CancellationToken cancellationToken = default)
+    {
+        if (StreakFreeze.CreateGap(userId, dates, userToday).IsFailure)
+            return null;
+
+        var user = await repos.Users.FindOneTrackedAsync(
+            candidate => candidate.Id == userId,
+            cancellationToken: cancellationToken);
+        if (user is null)
+            return null;
+
+        /**
+         * ONE window, and it is the streak engine's own. Eligibility must be decided over exactly the
+         * history CalculateStateAsync computes from, or a repair can be accepted on evidence the engine
+         * cannot see: the response, and the next RecalculateAsync, would recompute a zero streak and
+         * persist it AFTER the freeze was spent. A yearly predecessor sits 366 days back, outside this
+         * window, so a yearly gap stays unrepairable rather than repairable-then-silently-undone.
+         */
+        var lookbackStart = userToday.AddDays(-AppConstants.MaxStreakLookbackDays);
+        var gapStart = dates.Min();
+        if (gapStart <= lookbackStart)
+            return null;
+
+        var (completions, freezes, eligibleHabits) =
+            await LoadStreakDataAsync(userId, lookbackStart, cancellationToken);
+        var contributingHabits = GetContributingHabits(eligibleHabits);
+        if (!contributingHabits.Any(habit => habit.FrequencyUnit is not null))
+            return null;
+
+        var timeZone = TimeZoneHelper.FindTimeZone(user.TimeZone, userId: user.Id);
+        var expectedDates = HabitScheduleService.GetUnionScheduledDatesForStreak(
+            contributingHabits, lookbackStart, userToday, timeZone, user.WeekStartDay);
+        if (dates.Any(date => !expectedDates.Contains(date) || completions.Contains(date) || freezes.Contains(date)))
+            return null;
+
+        /**
+         * Streak continuity runs over SCHEDULED occurrences, never calendar days: a weekly habit's
+         * streak survives the six unscheduled days between two occurrences. Reading the calendar day
+         * before the gap made every weekly and every-N-day gap unrepairable, because that day is
+         * usually not scheduled and so carries neither a completion nor a freeze.
+         */
+        var scheduled = expectedDates.Order().ToArray();
+        var gapStartIndex = Array.IndexOf(scheduled, gapStart);
+        if (gapStartIndex < 0)
+            return null;
+
+        /**
+         * The selection must be an unbroken run of scheduled occurrences, so a caller cannot omit a
+         * missed occurrence inside the gap and claim the streak carried across it.
+         */
+        var orderedDates = dates.Order().ToArray();
+        if (gapStartIndex + orderedDates.Length > scheduled.Length
+            || orderedDates.Where((date, index) => date != scheduled[gapStartIndex + index]).Any())
+        {
+            return null;
+        }
+
+        /**
+         * Index 0 means the gap opens the window with no predecessor inside it, so there is no evidence
+         * the streak was alive going in.
+         */
+        if (gapStartIndex == 0)
+            return null;
+        var precedingDate = scheduled[gapStartIndex - 1];
+        if (!completions.Contains(precedingDate) && !freezes.Contains(precedingDate))
+            return null;
+
+        foreach (var month in dates.GroupBy(date => (date.Year, date.Month)))
+        {
+            var used = freezes.Count(date => date.Year == month.Key.Year && date.Month == month.Key.Month);
+            if (used + month.Count() > AppConstants.MaxStreakFreezesPerMonth)
+                return null;
+        }
+
+        var (currentStreak, _) = HabitScheduleService.ComputeStreakAsOf(
+            expectedDates, completions, freezes, lookbackStart, userToday);
+        var repairedDates = new HashSet<DateOnly>(freezes);
+        repairedDates.UnionWith(dates);
+        var (repairedStreak, lastActiveDate) = HabitScheduleService.ComputeStreakAsOf(
+            expectedDates, completions, repairedDates, lookbackStart, userToday);
+        if (repairedStreak <= currentStreak)
+            return null;
+
+        /**
+         * The predecessor travels WITH the state. The handler restores the award cursor against it, and
+         * deriving it there as `gapStart - 1` was the same calendar-versus-schedule mistake one layer up.
+         * The streak AS OF the predecessor, which bounds the fallback award cursor. Without it the
+         * domain rounded the full repaired streak down and marked milestones crossed AFTER the gap as
+         * already awarded, so a row with no saved snapshot spent a freeze and never received the one it
+         * had just earned.
+         */
+        var (preGapStreak, _) = HabitScheduleService.ComputeStreakAsOf(
+            expectedDates, completions, freezes, lookbackStart, precedingDate);
+        return new UserStreakState(repairedStreak,
+            Math.Max(user.LongestStreak, ComputeLongestStreak(expectedDates, completions, repairedDates)),
+            lastActiveDate, precedingDate, preGapStreak);
+    }
+
     internal static StreakRepairEvaluation EvaluateRepair(
         User user,
         DateOnly userToday,

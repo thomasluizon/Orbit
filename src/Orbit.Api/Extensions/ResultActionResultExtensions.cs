@@ -40,6 +40,8 @@ public static class ResultActionResultExtensions
         [ErrorCodes.PairLimitReached] = StatusCodes.Status409Conflict,
         [ErrorCodes.AlreadyCheckedIn] = StatusCodes.Status409Conflict,
         [ErrorCodes.StreakRepairUnavailable] = StatusCodes.Status409Conflict,
+        [ErrorCodes.StreakGapRepairUnavailable] = StatusCodes.Status409Conflict,
+        [DomainErrors.InsufficientStreakFreezes.Code] = StatusCodes.Status409Conflict,
 
         [ErrorCodes.SocialDisabled] = StatusCodes.Status403Forbidden,
         [ErrorCodes.Blocked] = StatusCodes.Status403Forbidden,

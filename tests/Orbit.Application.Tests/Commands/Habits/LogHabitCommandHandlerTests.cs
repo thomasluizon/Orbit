@@ -16,6 +16,7 @@ using Orbit.Domain.Interfaces;
 using Orbit.Domain.Models;
 using System.Data.Common;
 using System.Linq.Expressions;
+using Orbit.Application.Tests.Common;
 
 namespace Orbit.Application.Tests.Commands.Habits;
 
@@ -42,6 +43,7 @@ public class LogHabitCommandHandlerTests
 
     public LogHabitCommandHandlerTests()
     {
+        _unitOfWork.PassThroughTransactions<Result<LogHabitCommandHandler.PersistedLog>>();
         var repos = new LogHabitRepositories(_habitRepo, _habitLogRepo, _userRepo);
         var services = new LogHabitServices(
             _userDateService,

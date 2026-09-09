@@ -29,7 +29,18 @@ public class SkipHabitCommandHandler(
     IUnitOfWork unitOfWork,
     IMemoryCache cache) : IRequestHandler<SkipHabitCommand, Result>
 {
-    public async Task<Result> Handle(SkipHabitCommand request, CancellationToken cancellationToken)
+    /**
+     * A skip advances a due date or writes a skip log, both inputs a streak repair reads, so it
+     * commits inside HabitCeilingLock like every other writer of that state.
+     */
+    public Task<Result> Handle(SkipHabitCommand request, CancellationToken cancellationToken) =>
+        HabitCeilingLock.ExecuteAsync(
+            unitOfWork,
+            request.UserId,
+            transactionToken => SkipAsync(request, transactionToken),
+            cancellationToken);
+
+    private async Task<Result> SkipAsync(SkipHabitCommand request, CancellationToken cancellationToken)
     {
         var today = await userDateService.GetUserTodayAsync(request.UserId, cancellationToken);
         var loggableWindowStart = today.AddDays(-AppConstants.MaxRangeDays);

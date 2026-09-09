@@ -667,7 +667,20 @@ public partial class AgentCatalogService
                 isPhaseOneReadOnly: false,
                 AgentConfirmationRequirement.None,
                 planRequirement: "Pro",
-                controllerActions: ["GamificationController.RepairStreak"])
+                controllerActions: ["GamificationController.RepairStreak"]),
+
+            CreateCapability(
+                AgentCapabilityIds.GamificationRepairGap,
+                "Repair Streak Gap",
+                "Spends banked freezes to repair an entire contiguous streak gap atomically.",
+                "gamification",
+                AgentScopes.WriteGamification,
+                AgentRiskClass.Low,
+                isMutation: true,
+                isPhaseOneReadOnly: false,
+                AgentConfirmationRequirement.None,
+                planRequirement: "Pro",
+                controllerActions: ["StreakGapController.RepairGap"])
         ];
     }
 

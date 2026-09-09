@@ -30,18 +30,53 @@ public class RepairStreakCommandHandler(
         RepairStreakCommand request,
         CancellationToken cancellationToken)
     {
+        /**
+         * This repair reads the schedule and the freezes, then spends a banked freeze against what it
+         * read. Eligibility and spending share ONE consistency boundary, and it is the boundary every
+         * habit writer holds. See HabitCeilingLock.
+         */
+        Result outcome;
+        try
+        {
+            outcome = await HabitCeilingLock.ExecuteAsync(
+                unitOfWork,
+                request.UserId,
+                transactionToken => RepairYesterdayAsync(request, transactionToken),
+                cancellationToken);
+        }
+        catch (DbUpdateException exception) when (DbUniqueViolation.IsUniqueViolation(exception))
+        {
+            /**
+             * The freeze row for this date already exists, so the repair is already done. The catch
+             * sits OUTSIDE the transaction because a failed statement aborts the whole block: the
+             * reply query below cannot run until that block has rolled back.
+             */
+            unitOfWork.ResetTracking();
+            return await sender.Send(new GetStreakInfoQuery(request.UserId), cancellationToken);
+        }
+
+        if (outcome.IsFailure)
+            return outcome.PropagateError<StreakInfoResponse>();
+
+        return await sender.Send(new GetStreakInfoQuery(request.UserId), cancellationToken);
+    }
+
+    private async Task<Result> RepairYesterdayAsync(
+        RepairStreakCommand request,
+        CancellationToken cancellationToken)
+    {
         var user = await userRepository.FindOneTrackedAsync(
             candidate => candidate.Id == request.UserId,
             cancellationToken: cancellationToken);
         if (user is null)
-            return Result.Failure<StreakInfoResponse>(ErrorMessages.UserNotFound);
+            return Result.Failure(ErrorMessages.UserNotFound);
 
         var enabledFlags = await featureFlagService.GetEnabledKeysForUserAsync(
             request.UserId,
             cancellationToken);
         var unlocked = user.HasProAccess || enabledFlags.Contains(FeatureFlagKeys.GamificationFreeTier);
         if (!unlocked)
-            return Result.PayGateFailure<StreakInfoResponse>("Streak insights are a Pro feature. Upgrade to unlock!");
+            return Result.PayGateFailure("Streak insights are a Pro feature. Upgrade to unlock!");
 
         var today = await userDateService.GetUserTodayAsync(request.UserId, cancellationToken);
         var missedDate = today.AddDays(-1);
@@ -49,7 +84,7 @@ public class RepairStreakCommandHandler(
             freeze => freeze.UserId == request.UserId && freeze.UsedOnDate == missedDate,
             cancellationToken);
         if (alreadyRepaired)
-            return await sender.Send(new GetStreakInfoQuery(request.UserId), cancellationToken);
+            return Result.Success();
 
         var repair = await userStreakService.EvaluateRepairAsync(
             request.UserId,
@@ -59,12 +94,12 @@ public class RepairStreakCommandHandler(
         if (repair is not { IsAvailable: true, RepairedState: not null }
             || repair.MissedDate != missedDate)
         {
-            return Result.Failure<StreakInfoResponse>(ErrorMessages.StreakRepairUnavailable);
+            return Result.Failure(ErrorMessages.StreakRepairUnavailable);
         }
 
         var consumeResult = user.ConsumeStreakFreeze();
         if (consumeResult.IsFailure)
-            return Result.Failure<StreakInfoResponse>(ErrorMessages.StreakRepairUnavailable);
+            return Result.Failure(ErrorMessages.StreakRepairUnavailable);
 
         user.SetStreakState(
             repair.RepairedState.CurrentStreak,
@@ -74,15 +109,7 @@ public class RepairStreakCommandHandler(
             StreakFreeze.Create(request.UserId, missedDate),
             cancellationToken);
 
-        try
-        {
-            await unitOfWork.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateException exception) when (DbUniqueViolation.IsUniqueViolation(exception))
-        {
-            unitOfWork.ResetTracking();
-            return await sender.Send(new GetStreakInfoQuery(request.UserId), cancellationToken);
-        }
+        await unitOfWork.SaveChangesAsync(cancellationToken);
 
         AnalyticsCapture.SafeCaptureUserEvent(
             productAnalytics,
@@ -95,6 +122,6 @@ public class RepairStreakCommandHandler(
                 ["remaining_bank"] = user.StreakFreezesAccumulated
             });
 
-        return await sender.Send(new GetStreakInfoQuery(request.UserId), cancellationToken);
+        return Result.Success();
     }
 }

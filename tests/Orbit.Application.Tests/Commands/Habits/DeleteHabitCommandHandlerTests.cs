@@ -7,6 +7,8 @@ using Orbit.Domain.Entities;
 using Orbit.Domain.Enums;
 using Orbit.Domain.Interfaces;
 using Orbit.Domain.Models;
+using Orbit.Application.Tests.Common;
+using Orbit.Domain.Common;
 
 namespace Orbit.Application.Tests.Commands.Habits;
 
@@ -24,6 +26,7 @@ public class DeleteHabitCommandHandlerTests
 
     public DeleteHabitCommandHandlerTests()
     {
+        _unitOfWork.PassThroughTransactions<Result>();
         _handler = new DeleteHabitCommandHandler(_habitRepo, _userStreakService, _unitOfWork, _userDateService, _cache);
         _userDateService.GetUserTodayAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(Today);
         _userStreakService.RecalculateAsync(UserId, cancellationToken: Arg.Any<CancellationToken>())

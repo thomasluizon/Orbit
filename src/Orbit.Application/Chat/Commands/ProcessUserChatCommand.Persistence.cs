@@ -14,14 +14,22 @@ public partial class ProcessUserChatCommandHandler
         IReadOnlyList<ActionResult> actionResults,
         CancellationToken cancellationToken)
     {
-        await execution.UnitOfWork.SaveChangesAsync(cancellationToken);
-        if (RequiresStreakRecalculation(actionResults))
+        /**
+         * Every habit tool stages its mutation against the shared change tracker and this is the one
+         * place those stagings commit, so this is where the chat path joins HabitCeilingLock. Skip,
+         * log, delete and schedule edits made through Astra are inputs a streak repair reads.
+         */
+        await HabitCeilingLock.ExecuteAsync(execution.UnitOfWork, userId, async transactionToken =>
         {
-            await ConcurrencyRetry.SaveWithRetryAsync(
-                execution.UnitOfWork,
-                ct => execution.UserStreakService.RecalculateAsync(userId, cancellationToken: ct),
-                cancellationToken);
-        }
+            await execution.UnitOfWork.SaveChangesAsync(transactionToken);
+            if (RequiresStreakRecalculation(actionResults))
+            {
+                await ConcurrencyRetry.SaveWithRetryAsync(
+                    execution.UnitOfWork,
+                    ct => execution.UserStreakService.RecalculateAsync(userId, cancellationToken: ct),
+                    transactionToken);
+            }
+        }, cancellationToken);
 
         await ProcessOnboardingChecklistSafeAsync(userId, OnboardingChecklistSignal.AstraUsed, cancellationToken);
     }

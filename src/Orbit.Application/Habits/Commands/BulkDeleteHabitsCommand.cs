@@ -37,7 +37,7 @@ public class BulkDeleteHabitsCommandHandler(
             cancellationToken);
         var habitDict = habits.ToDictionary(h => h.Id);
 
-        await unitOfWork.ExecuteInTransactionAsync(async ct =>
+        await HabitCeilingLock.ExecuteAsync(unitOfWork, request.UserId, async ct =>
         {
             for (int i = 0; i < request.HabitIds.Count; i++)
             {

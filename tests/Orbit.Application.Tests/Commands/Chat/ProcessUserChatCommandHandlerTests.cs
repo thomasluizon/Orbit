@@ -20,6 +20,7 @@ using Orbit.Domain.Enums;
 using Orbit.Domain.Interfaces;
 using Orbit.Domain.Models;
 using Orbit.Domain.ValueObjects;
+using Orbit.Application.Tests.Common;
 
 namespace Orbit.Application.Tests.Commands.Chat;
 
@@ -109,6 +110,7 @@ public class ProcessUserChatCommandHandlerTests
 
     public ProcessUserChatCommandHandlerTests()
     {
+        _unitOfWork.PassThroughTransactions();
         SetupScopeFactory();
         _catalogService.GetCapabilities().Returns([BuildCapability("test_capability")]);
         _catalogService.GetCapability(Arg.Any<string>())

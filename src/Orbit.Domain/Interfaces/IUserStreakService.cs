@@ -4,6 +4,12 @@ namespace Orbit.Domain.Interfaces;
 
 public interface IUserStreakService
 {
+    Task<UserStreakState?> EvaluateGapRepairAsync(
+        Guid userId,
+        DateOnly userToday,
+        IReadOnlyCollection<DateOnly> dates,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Recompute the user's streak state from logs, freezes, and habit schedules.
     /// </summary>
