@@ -327,19 +327,27 @@ public class GetRetrospectiveQueryHandlerTests
     }
 
     [Fact]
-    public async Task Handle_FlagsOneTimeTasks_AsBinary()
+    public async Task Handle_HabitRankings_ExcludeOneTimeTasks()
     {
-        var recurring = CreateLoggedHabit("Recurring");
-        var oneTime = Habit.Create(new HabitCreateParams(
-            UserId, "One Time", null, null, DueDate: DateFrom)).Value;
-        StubHabits(recurring, oneTime);
+        var recurring = CreateDailyHabit("Recurring");
+        for (var i = 0; i < 6; i++)
+            recurring.Log(DateFrom.AddDays(i), advanceDueDate: false);
+
+        var completedOneTime = Habit.Create(new HabitCreateParams(
+            UserId, "Completed One Time", null, null, DueDate: DateFrom)).Value;
+        completedOneTime.Log(DateFrom, advanceDueDate: false);
+        var incompleteOneTime = Habit.Create(new HabitCreateParams(
+            UserId, "Incomplete One Time", null, null, DueDate: DateFrom)).Value;
+        StubHabits(recurring, completedOneTime, incompleteOneTime);
         StubNarrative(SampleNarrative);
 
         var result = await HandleWeek();
 
-        var needs = result.Value.Metrics.NeedsAttention;
-        needs.Single(s => s.Name == "One Time").IsOneTime.Should().BeTrue();
-        needs.Single(s => s.Name == "One Time").CompletedCount.Should().Be(0);
-        needs.Single(s => s.Name == "Recurring").IsOneTime.Should().BeFalse();
+        var metrics = result.Value.Metrics;
+        metrics.TopHabits.Should().ContainSingle()
+            .Which.Name.Should().Be("Recurring");
+        metrics.TopHabits[0].CompletionRate.Should().Be(86);
+        metrics.NeedsAttention.Should().ContainSingle()
+            .Which.Name.Should().Be("Recurring");
     }
 }
