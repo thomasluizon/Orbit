@@ -2944,10 +2944,10 @@
       "Challenges": 14,
       "Chat": 61,
       "ChecklistTemplates": 9,
-      "Common": 192,
-      "Gamification": 42,
+      "Common": 193,
+      "Gamification": 43,
       "Goals": 54,
-      "Habits": 89,
+      "Habits": 90,
       "Marketing": 6,
       "Notifications": 20,
       "Profile": 40,
@@ -4038,6 +4038,18 @@
         "references": [
           "GetStreakInfoQuery",
           "RepairStreakGapCommand",
+          "RepairStreakGapCommandHandler",
+          "StreakFreeze",
+          "User"
+        ]
+      },
+      {
+        "testClass": "RepairStreakGapConcurrencyTests",
+        "file": "tests/Orbit.Application.Tests/Commands/Gamification/RepairStreakGapConcurrencyTests.cs",
+        "references": [
+          "DeleteHabitCommandHandler",
+          "GetStreakInfoQuery",
+          "Habit",
           "RepairStreakGapCommandHandler",
           "StreakFreeze",
           "User"
