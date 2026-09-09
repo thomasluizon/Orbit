@@ -116,13 +116,15 @@ public static class RetrospectiveMetricsCalculator
         var periodDays = dateTo.DayNumber - dateFrom.DayNumber + 1;
         var weeklyConsistency = BuildWeeklyConsistency(weekdayScheduled, weekdayCompleted);
 
-        var topHabits = stats
+        var recurringStats = stats.Where(s => !s.IsOneTime);
+
+        var topHabits = recurringStats
             .OrderByDescending(s => s.CompletionRate)
             .ThenByDescending(s => s.CompletedCount)
             .Take(MaxHabitStats)
             .ToList();
 
-        var needsAttention = stats
+        var needsAttention = recurringStats
             .Where(s => s.CompletionRate < 100)
             .OrderBy(s => s.CompletionRate)
             .ThenByDescending(s => s.ScheduledCount)
