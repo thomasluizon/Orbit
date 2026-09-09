@@ -593,23 +593,26 @@ public partial class User : Entity
     }
 
     /// <param name="preGapStreak">
-    /// The streak as of <paramref name="precedingDate"/>, used only when no saved snapshot matches.
-    /// It bounds the fallback cursor to what was earned BEFORE the gap. Rounding the full repaired
-    /// streak down instead marked milestones crossed by completions AFTER the gap as already awarded,
-    /// so a pre-migration row could spend its banked freeze and never receive the one it just earned.
+    /// The streak as of <paramref name="precedingDate"/>, bounding the award cursor to what was earned
+    /// BEFORE the gap. Rounding the full repaired streak down instead marked milestones crossed by
+    /// completions AFTER the gap as already awarded, so a pre-migration row could spend its banked
+    /// freeze and never receive the one it just earned.
+    /// <para>
+    /// It also caps a MATCHING saved snapshot, which survives later recalculations on purpose and can
+    /// therefore describe a longer run than the one being repaired: unlogging an older pre-gap
+    /// completion shortens the run while a cursor of 14 still matches on date, which would suppress
+    /// the awards the shorter run has re-earned.
+    /// </para>
+    /// <para>
+    /// NULLABLE on purpose. A caller that cannot say what the run into the gap was must not be read as
+    /// saying it was ZERO, which silently collapses the cursor and re-grants every milestone the user
+    /// already had. Unknown means do not bound, the behaviour that stood before the bound existed.
+    /// </para>
     /// </param>
     public void RestoreStreakAfterGapRepair(
         int currentStreak, int longestStreak, DateOnly? lastActiveDate, DateOnly precedingDate,
         int? preGapStreak)
     {
-        // The snapshot survives later recalculations on purpose, so it can describe a LONGER run than
-        // the one being repaired: unlogging an older pre-gap completion shortens the run while a cursor
-        // of 14 still matches on date. Taken alone it would suppress the 7 and 14 awards the shorter
-        // run has now re-earned, so the saved value is capped by what the current pre-gap run supports.
-        // NULLABLE on purpose. A caller that cannot say what the run into the gap was must not be read
-        // as saying it was ZERO: that silently collapses the cursor to 0 and re-grants every milestone
-        // the user already had. Unknown therefore means "do not bound", which is the behaviour that
-        // stood before the bound existed.
         var earnedBeforeTheGap = GetEligibleFreezeAwardStreak(
             preGapStreak.HasValue ? Math.Min(preGapStreak.Value, currentStreak) : currentStreak,
             DefaultStreakDaysPerFreeze);
