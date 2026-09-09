@@ -149,6 +149,20 @@ public class StreakGapRepairTests
         _user.AwardStreakFreezeIfEligible();
         _user.SetStreakState(0, bank * 7, null);
         var unitOfWork = Substitute.For<IUnitOfWork>();
+        /**
+         * The repair runs inside HabitCeilingLock, the same per-user advisory lock every habit writer
+         * holds, so eligibility and the bank spend cannot be split by a concurrent schedule edit. A
+         * substituted unit of work returns null from the transaction wrapper unless the operation is
+         * actually invoked, so these end-to-end cases run it exactly as the real one does.
+         */
+        unitOfWork.ExecuteInTransactionAsync(
+                Arg.Any<Func<CancellationToken, Task<Result<int>>>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var operation = call.ArgAt<Func<CancellationToken, Task<Result<int>>>>(0);
+                return operation(call.ArgAt<CancellationToken>(1));
+            });
         var sender = Substitute.For<ISender>();
         var flags = Substitute.For<IFeatureFlagService>();
         flags.GetEnabledKeysForUserAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(Array.Empty<string>());
@@ -533,6 +547,20 @@ public class StreakGapRepairTests
         _freezes.AddAsync(Arg.Any<StreakFreeze>(), Arg.Any<CancellationToken>())
             .Returns(call => { staged.Add(call.Arg<StreakFreeze>()); return Task.CompletedTask; });
         var unitOfWork = Substitute.For<IUnitOfWork>();
+        /**
+         * The repair runs inside HabitCeilingLock, the same per-user advisory lock every habit writer
+         * holds, so eligibility and the bank spend cannot be split by a concurrent schedule edit. A
+         * substituted unit of work returns null from the transaction wrapper unless the operation is
+         * actually invoked, so these end-to-end cases run it exactly as the real one does.
+         */
+        unitOfWork.ExecuteInTransactionAsync(
+                Arg.Any<Func<CancellationToken, Task<Result<int>>>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var operation = call.ArgAt<Func<CancellationToken, Task<Result<int>>>>(0);
+                return operation(call.ArgAt<CancellationToken>(1));
+            });
         unitOfWork.SaveChangesAsync(Arg.Any<CancellationToken>()).Returns(_ =>
         {
             _persistedFreezes.AddRange(staged);

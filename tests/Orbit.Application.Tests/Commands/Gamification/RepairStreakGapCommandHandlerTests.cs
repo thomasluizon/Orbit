@@ -40,6 +40,60 @@ public class RepairStreakGapCommandHandlerTests
         _streakService.EvaluateGapRepairAsync(_user.Id, Today, Dates, Arg.Any<CancellationToken>())
             .Returns(new UserStreakState(14, 14, Dates[^1]));
         _sender.Send(Arg.Any<GetStreakInfoQuery>(), Arg.Any<CancellationToken>()).Returns(Result.Success(Response()));
+        _unitOfWork.ExecuteInTransactionAsync(
+                Arg.Any<Func<CancellationToken, Task<Result<int>>>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var operation = call.ArgAt<Func<CancellationToken, Task<Result<int>>>>(0);
+                return operation(call.ArgAt<CancellationToken>(1));
+            });
+    }
+
+    /**
+     * The consistency boundary, asserted by ORDER rather than by presence.
+     *
+     * Eligibility is decided from the habits, the logs and the schedule derived from them, and the save
+     * then spends the freeze bank. User.xmin cannot hold those together, because a schedule-only habit
+     * edit commits without touching the user row and the optimistic token never fires. So the repair
+     * has to hold the SAME per-user advisory lock every habit writer holds: UpdateHabitCommand,
+     * LogHabitCommand, CreateHabitCommand, MoveHabitParentCommand and RestoreHabitCommand all take
+     * HabitCeilingLock.ForUser. The key is taken from that shared helper here for exactly that reason,
+     * so a rename cannot leave this passing against a lock nobody else holds.
+     *
+     * Lock, then evaluate, then save, in that order and inside one transaction, is what makes a
+     * concurrent cadence or due-date change unable to land between the eligibility read and the spend.
+     */
+    [Fact]
+    public async Task Repair_LocksBeforeEvaluatingAndSpends_SoAScheduleEditCannotLandBetweenThem()
+    {
+        Bank(2);
+        var order = new List<string>();
+        _unitOfWork.AcquireAdvisoryLockAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                order.Add($"lock:{call.ArgAt<string>(0)}");
+                return Task.CompletedTask;
+            });
+        _streakService.EvaluateGapRepairAsync(_user.Id, Today, Dates, Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                order.Add("evaluate");
+                return new UserStreakState(14, 14, Dates[^1]);
+            });
+        _unitOfWork.SaveChangesAsync(Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                order.Add("save");
+                return Task.FromResult(3);
+            });
+
+        var result = await _handler.Handle(new(_user.Id, Dates), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        order.Should().Equal($"lock:{HabitCeilingLock.ForUser(_user.Id)}", "evaluate", "save");
+        await _unitOfWork.Received(1).ExecuteInTransactionAsync(
+            Arg.Any<Func<CancellationToken, Task<Result<int>>>>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
