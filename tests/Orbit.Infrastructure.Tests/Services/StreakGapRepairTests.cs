@@ -347,23 +347,29 @@ public class StreakGapRepairTests
 
         _dateService.GetUserTodayAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(_today);
         await _service.RecalculateAsync(_user.Id, awardFreezeIfEligible: false);
-        // The deployment boundary: rows written before the cursor migration carry no snapshot at all,
-        // and the freeze being spent was banked by an earlier run this fixture does not replay.
+        /**
+         * The deployment boundary: rows written before the cursor migration carry no snapshot at all,
+         * and the freeze being spent was banked by an earlier run this fixture does not replay.
+         */
         SetUserProperty(nameof(User.PreGapFreezeAwardStreak), null);
         SetUserProperty(nameof(User.PreGapLastActiveDate), null);
         SetUserProperty(nameof(User.StreakFreezesAccumulated), 1);
 
-        // The completion AFTER the gap. It is what carries the repaired run across seven days, and so
-        // what the old fallback quietly recorded as an already-granted milestone.
+        /**
+         * The completion AFTER the gap. It is what carries the repaired run across seven days, and so
+         * what the old fallback quietly recorded as an already-granted milestone.
+         */
         _habit.Log(_today, advanceDueDate: false);
 
         var (handler, _) = BuildRepairHandler();
         var result = await handler.Handle(new(_user.Id, [_today.AddDays(-1)]), CancellationToken.None);
 
         result.IsSuccess.Should().BeTrue();
-        // GRANTED by the repair itself, not merely left eligible. The response comes from
-        // GetStreakInfoQuery, which calls CalculateAsync rather than RecalculateAsync, so an award only
-        // made eligible here would sit pending and be lost the next time the streak reset.
+        /**
+         * GRANTED by the repair itself, not merely left eligible. The response comes from
+         * GetStreakInfoQuery, which calls CalculateAsync rather than RecalculateAsync, so an award only
+         * made eligible here would sit pending and be lost the next time the streak reset.
+         */
         _user.StreakFreezesAccumulated.Should().Be(1);
         _user.LastFreezeAwardStreak.Should().Be(7);
     }
@@ -381,7 +387,9 @@ public class StreakGapRepairTests
         _user.LastFreezeAwardStreak.Should().Be(14);
         _user.SetStreakState(0, 14, null);
 
-        // The same predecessor date the snapshot holds, but the run going into it is now only 7 long.
+        /**
+         * The same predecessor date the snapshot holds, but the run going into it is now only 7 long.
+         */
         _user.RestoreStreakAfterGapRepair(7, 14, _today, _today.AddDays(-2), preGapStreak: 7);
 
         _user.LastFreezeAwardStreak.Should().Be(7);
