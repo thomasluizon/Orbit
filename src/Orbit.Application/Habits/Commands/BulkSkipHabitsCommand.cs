@@ -44,7 +44,7 @@ public class BulkSkipHabitsCommandHandler(
             today.AddDays(-AppConstants.MaxRangeDays),
             cancellationToken);
 
-        // A skip advances a due date or writes a skip log, both inputs a streak repair reads.
+        /** A skip advances a due date or writes a skip log, both inputs a streak repair reads. */
         await HabitCeilingLock.ExecuteAsync(unitOfWork, request.UserId, async ct =>
         {
             for (int i = 0; i < request.Items.Count; i++)

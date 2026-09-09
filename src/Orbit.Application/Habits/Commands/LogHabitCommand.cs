@@ -216,9 +216,11 @@ public partial class LogHabitCommandHandler(
         Result<PersistedLog> persisted;
         try
         {
-            // The log row and the due-date advance are both inputs a streak repair reads, so they
-            // commit inside HabitCeilingLock. Only the persist is locked: the streak, gamification,
-            // challenge and referral work below is derived and writes the token-protected user row.
+            /**
+             * The log row and the due-date advance are both inputs a streak repair reads, so they
+             * commit inside HabitCeilingLock. Only the persist is locked: the streak, gamification,
+             * challenge and referral work below is derived and writes the token-protected user row.
+             */
             persisted = await HabitCeilingLock.ExecuteAsync(
                 unitOfWork,
                 request.UserId,
@@ -228,8 +230,10 @@ public partial class LogHabitCommandHandler(
         }
         catch (DbUpdateException exception) when (IsUniqueViolation(exception))
         {
-            // The completion already exists. The catch sits OUTSIDE the transaction because a failed
-            // statement aborts the whole block, and the reply below has to read rows.
+            /**
+             * The completion already exists. The catch sits OUTSIDE the transaction because a failed
+             * statement aborts the whole block, and the reply below has to read rows.
+             */
             unitOfWork.ResetTracking();
             return await BuildAlreadyLoggedResultAsync(habit, targetDate, today, cancellationToken);
         }

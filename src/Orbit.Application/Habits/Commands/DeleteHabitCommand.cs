@@ -22,8 +22,10 @@ public class DeleteHabitCommandHandler(
 {
     public async Task<Result> Handle(DeleteHabitCommand request, CancellationToken cancellationToken)
     {
-        // A soft delete removes occurrences from the schedule a streak repair decides eligibility
-        // from, so it commits inside HabitCeilingLock like every other writer of that state.
+        /**
+         * A soft delete removes occurrences from the schedule a streak repair decides eligibility
+         * from, so it commits inside HabitCeilingLock like every other writer of that state.
+         */
         var result = await HabitCeilingLock.ExecuteAsync(
             unitOfWork,
             request.UserId,

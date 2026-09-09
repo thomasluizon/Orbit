@@ -30,9 +30,11 @@ public class RepairStreakCommandHandler(
         RepairStreakCommand request,
         CancellationToken cancellationToken)
     {
-        // This repair reads the schedule and the freezes, then spends a banked freeze against what it
-        // read. Eligibility and spending share ONE consistency boundary, and it is the boundary every
-        // habit writer holds. See HabitCeilingLock.
+        /**
+         * This repair reads the schedule and the freezes, then spends a banked freeze against what it
+         * read. Eligibility and spending share ONE consistency boundary, and it is the boundary every
+         * habit writer holds. See HabitCeilingLock.
+         */
         Result outcome;
         try
         {
@@ -44,9 +46,11 @@ public class RepairStreakCommandHandler(
         }
         catch (DbUpdateException exception) when (DbUniqueViolation.IsUniqueViolation(exception))
         {
-            // The freeze row for this date already exists, so the repair is already done. The catch
-            // sits OUTSIDE the transaction because a failed statement aborts the whole block: the
-            // reply query below cannot run until that block has rolled back.
+            /**
+             * The freeze row for this date already exists, so the repair is already done. The catch
+             * sits OUTSIDE the transaction because a failed statement aborts the whole block: the
+             * reply query below cannot run until that block has rolled back.
+             */
             unitOfWork.ResetTracking();
             return await sender.Send(new GetStreakInfoQuery(request.UserId), cancellationToken);
         }

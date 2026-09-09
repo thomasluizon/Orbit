@@ -29,9 +29,11 @@ public class SkipHabitCommandHandler(
     IUnitOfWork unitOfWork,
     IMemoryCache cache) : IRequestHandler<SkipHabitCommand, Result>
 {
+    /**
+     * A skip advances a due date or writes a skip log, both inputs a streak repair reads, so it
+     * commits inside HabitCeilingLock like every other writer of that state.
+     */
     public Task<Result> Handle(SkipHabitCommand request, CancellationToken cancellationToken) =>
-        // A skip advances a due date or writes a skip log, both inputs a streak repair reads, so it
-        // commits inside HabitCeilingLock like every other writer of that state.
         HabitCeilingLock.ExecuteAsync(
             unitOfWork,
             request.UserId,
