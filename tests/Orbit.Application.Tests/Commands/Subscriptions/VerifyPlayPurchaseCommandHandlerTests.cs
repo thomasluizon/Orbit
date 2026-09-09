@@ -25,7 +25,7 @@ public class VerifyPlayPurchaseCommandHandlerTests
     private static readonly Guid UserId = Guid.NewGuid();
 
     private static readonly IOptions<GooglePlaySettings> Settings = Options.Create(
-        new GooglePlaySettings { ProductId = "orbit_pro", MonthlyBasePlanId = "monthly", YearlyBasePlanId = "yearly" });
+        new GooglePlaySettings { PackageName = "org.useorbit.app", ProductId = "orbit_pro", MonthlyBasePlanId = "monthly", YearlyBasePlanId = "yearly" });
 
     public VerifyPlayPurchaseCommandHandlerTests()
     {
@@ -49,6 +49,30 @@ public class VerifyPlayPurchaseCommandHandlerTests
         new(true, DateTime.UtcNow.AddMonths(1), SubscriptionInterval.Monthly, acknowledged, "orbit_pro", null, UserId.ToString());
 
     private static VerifyPlayPurchaseCommand Command() => new(UserId, "orbit_pro", "play_token_123");
+
+    [Theory]
+    [InlineData("SUBSCRIPTION_STATE_IN_GRACE_PERIOD", SubscriptionLapseReason.PaymentFailed)]
+    [InlineData("SUBSCRIPTION_STATE_ACTIVE", null)]
+    public async Task Handle_VerifiedPaymentState_UpdatesReasonWithoutLosingAccess(
+        string subscriptionState, SubscriptionLapseReason? expectedReason)
+    {
+        var user = User.Create("Thomas", "test@example.com").Value;
+        var expiresAt = DateTime.UtcNow.AddMonths(1);
+        user.SetPlaySubscription("play_token_123", expiresAt, SubscriptionInterval.Monthly);
+        user.RecordSubscriptionLapseReason(SubscriptionSource.GooglePlay, SubscriptionLapseReason.PaymentFailed);
+        StubUser(user);
+        using var play = new PlayBillingTestClient(subscriptionState, expiresAt, UserId, Settings);
+        StubVerify(await play.Billing.VerifyAsync("orbit_pro", "play_token_123", CancellationToken.None));
+
+        var result = await _handler.Handle(Command(), CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.HasProAccess.Should().BeTrue();
+        result.Value.Source.Should().Be("play");
+        user.SubscriptionLapseReason.Should().Be(expectedReason);
+        user.SubscriptionEndedAtUtc.Should().BeNull();
+        await _unitOfWork.Received().SaveChangesAsync(Arg.Any<CancellationToken>());
+    }
 
     [Fact]
     public async Task Handle_UserNotFound_ReturnsFailure()

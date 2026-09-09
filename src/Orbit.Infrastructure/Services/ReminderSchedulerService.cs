@@ -62,7 +62,7 @@ public partial class ReminderSchedulerService(
 
     private async Task ProcessRelativeReminders(OrbitDbContext dbContext, List<PendingReminderPush> pending, CancellationToken ct)
     {
-#pragma warning disable ORBIT0004 // WHY: pre-existing deliberate UTC-date window or UTC-keyed dedupe/aggregation bucket (not a user's calendar date), per-site justification ledger: https://github.com/thomasluizon/orbit-api/issues/431
+#pragma warning disable ORBIT0004
         var minLocalDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-1));
         var maxLocalDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1));
 #pragma warning restore ORBIT0004
@@ -82,7 +82,7 @@ public partial class ReminderSchedulerService(
             .ToDictionaryAsync(u => u.Id, ct);
 
         var habitIds = habits.Select(h => h.Id).ToList();
-#pragma warning disable ORBIT0004 // WHY: pre-existing deliberate UTC-date window or UTC-keyed dedupe/aggregation bucket (not a user's calendar date), per-site justification ledger: https://github.com/thomasluizon/orbit-api/issues/431
+#pragma warning disable ORBIT0004
         var utcToday = DateOnly.FromDateTime(DateTime.UtcNow);
 #pragma warning restore ORBIT0004
         var minWindowDate = utcToday.AddDays(-1);
@@ -157,7 +157,7 @@ public partial class ReminderSchedulerService(
 
     private async Task ProcessScheduledReminders(OrbitDbContext dbContext, List<PendingReminderPush> pending, CancellationToken ct)
     {
-#pragma warning disable ORBIT0004 // WHY: pre-existing deliberate UTC-date window or UTC-keyed dedupe/aggregation bucket (not a user's calendar date), per-site justification ledger: https://github.com/thomasluizon/orbit-api/issues/431
+#pragma warning disable ORBIT0004
         var minLocalDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-1));
         var maxDayBeforeDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(2));
 #pragma warning restore ORBIT0004
@@ -179,7 +179,7 @@ public partial class ReminderSchedulerService(
             .ToDictionaryAsync(u => u.Id, ct);
 
         var habitIds = habits.Select(h => h.Id).ToList();
-#pragma warning disable ORBIT0004 // WHY: pre-existing deliberate UTC-date window or UTC-keyed dedupe/aggregation bucket (not a user's calendar date), per-site justification ledger: https://github.com/thomasluizon/orbit-api/issues/431
+#pragma warning disable ORBIT0004
         var utcToday = DateOnly.FromDateTime(DateTime.UtcNow);
 #pragma warning restore ORBIT0004
 
