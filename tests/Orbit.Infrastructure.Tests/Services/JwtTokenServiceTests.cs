@@ -1,5 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -104,6 +105,67 @@ public class JwtTokenServiceTests
             .Claims.Single(c => c.Type == JwtRegisteredClaimNames.Jti).Value;
 
         secondJti.Should().NotBe(firstJti);
+    }
+
+    /// <summary>
+    /// Pins the token payload used by getUserFromPayload in apps/mobile/stores/auth-store.ts
+    /// and OrbitWidgetModule.accountId in the Android widget.
+    /// </summary>
+    [Fact]
+    public void GenerateToken_RawPayloadPreservesClientContract()
+    {
+        var userId = Guid.Parse("11111111-2222-3333-4444-555555555555");
+        const string email = "probe@orbit.test";
+
+        var token = _sut.GenerateToken(userId, email);
+
+        var segments = token.Split('.');
+        segments.Should().HaveCount(3);
+
+        var encodedPayload = segments[1]
+            .Replace('-', '+')
+            .Replace('_', '/');
+        var paddingLength = (4 - (encodedPayload.Length % 4)) % 4;
+        var payloadBytes = Convert.FromBase64String(
+            encodedPayload.PadRight(encodedPayload.Length + paddingLength, '='));
+
+        using var document = JsonDocument.Parse(payloadBytes);
+        var properties = document.RootElement
+            .EnumerateObject()
+            .ToDictionary(property => property.Name, property => property.Value);
+
+        properties.Keys.Should().BeEquivalentTo(
+        [
+            "aud",
+            "iss",
+            "exp",
+            "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier",
+            "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            "jti",
+            "iat",
+            "nbf"
+        ]);
+
+        properties["aud"].ValueKind.Should().Be(JsonValueKind.String);
+        properties["aud"].GetString().Should().Be(_settings.Audience);
+        properties["iss"].ValueKind.Should().Be(JsonValueKind.String);
+        properties["iss"].GetString().Should().Be(_settings.Issuer);
+        properties["exp"].ValueKind.Should().Be(JsonValueKind.Number);
+        properties["exp"].TryGetInt64(out _).Should().BeTrue();
+        properties["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"]
+            .ValueKind.Should().Be(JsonValueKind.String);
+        properties["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier"]
+            .GetString().Should().Be(userId.ToString());
+        properties["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"]
+            .ValueKind.Should().Be(JsonValueKind.String);
+        properties["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"]
+            .GetString().Should().Be(email);
+        properties["jti"].ValueKind.Should().Be(JsonValueKind.String);
+        Guid.TryParse(properties["jti"].GetString(), out _).Should().BeTrue();
+        properties["iat"].ValueKind.Should().Be(JsonValueKind.Number);
+        properties["iat"].TryGetInt64(out _).Should().BeTrue();
+        properties["nbf"].ValueKind.Should().Be(JsonValueKind.Number);
+        properties["nbf"].TryGetInt64(out _).Should().BeTrue();
     }
 
     [Fact]
