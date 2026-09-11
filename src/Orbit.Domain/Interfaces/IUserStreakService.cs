@@ -4,6 +4,11 @@ namespace Orbit.Domain.Interfaces;
 
 public interface IUserStreakService
 {
+    Task<IReadOnlyList<DateOnly>> GetRepairableGapDatesAsync(
+        Guid userId,
+        DateOnly userToday,
+        CancellationToken cancellationToken = default);
+
     Task<UserStreakState?> EvaluateGapRepairAsync(
         Guid userId,
         DateOnly userToday,

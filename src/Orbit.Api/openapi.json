@@ -15369,6 +15369,16 @@
               "string"
             ],
             "format": "int32"
+          },
+          "repairableGapDates": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string",
+              "format": "date"
+            }
           }
         }
       },

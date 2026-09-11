@@ -81,6 +81,51 @@ public class UserStreakService(
             freezeDateSet);
     }
 
+    public async Task<IReadOnlyList<DateOnly>> GetRepairableGapDatesAsync(
+        Guid userId,
+        DateOnly userToday,
+        CancellationToken cancellationToken = default)
+    {
+        var users = await repos.Users.FindAsync(
+            user => user.Id == userId,
+            cancellationToken);
+        var user = users.SingleOrDefault();
+        if (user is null)
+            return [];
+
+        var lookbackStart = userToday.AddDays(-AppConstants.MaxStreakLookbackDays);
+        var (completions, freezes, eligibleHabits) =
+            await LoadStreakDataAsync(userId, lookbackStart, cancellationToken);
+        var contributingHabits = GetContributingHabits(eligibleHabits);
+        if (!contributingHabits.Any(habit => habit.FrequencyUnit is not null))
+            return [];
+
+        var timeZone = TimeZoneHelper.FindTimeZone(user.TimeZone, userId: user.Id);
+        var expectedDates = HabitScheduleService.GetUnionScheduledDatesForStreak(
+            contributingHabits, lookbackStart, userToday, timeZone, user.WeekStartDay);
+        var scheduled = expectedDates.Order().ToArray();
+        var gapEndIndex = Array.IndexOf(scheduled, userToday.AddDays(-1));
+        if (gapEndIndex < 0
+            || completions.Contains(scheduled[gapEndIndex])
+            || freezes.Contains(scheduled[gapEndIndex]))
+        {
+            return [];
+        }
+
+        var gapStartIndex = gapEndIndex;
+        while (gapStartIndex > 0
+            && !completions.Contains(scheduled[gapStartIndex - 1])
+            && !freezes.Contains(scheduled[gapStartIndex - 1]))
+        {
+            gapStartIndex--;
+        }
+
+        var dates = scheduled[gapStartIndex..(gapEndIndex + 1)];
+        return EvaluateGapRepair(user, userToday, dates, expectedDates, completions, freezes) is null
+            ? []
+            : dates;
+    }
+
     public async Task<UserStreakState?> EvaluateGapRepairAsync(
         Guid userId,
         DateOnly userToday,
@@ -117,6 +162,20 @@ public class UserStreakService(
         var timeZone = TimeZoneHelper.FindTimeZone(user.TimeZone, userId: user.Id);
         var expectedDates = HabitScheduleService.GetUnionScheduledDatesForStreak(
             contributingHabits, lookbackStart, userToday, timeZone, user.WeekStartDay);
+
+        return EvaluateGapRepair(user, userToday, dates, expectedDates, completions, freezes);
+    }
+
+    private static UserStreakState? EvaluateGapRepair(
+        User user,
+        DateOnly userToday,
+        IReadOnlyCollection<DateOnly> dates,
+        HashSet<DateOnly> expectedDates,
+        HashSet<DateOnly> completions,
+        HashSet<DateOnly> freezes)
+    {
+        var lookbackStart = userToday.AddDays(-AppConstants.MaxStreakLookbackDays);
+        var gapStart = dates.Min();
         if (dates.Any(date => !expectedDates.Contains(date) || completions.Contains(date) || freezes.Contains(date)))
             return null;
 
