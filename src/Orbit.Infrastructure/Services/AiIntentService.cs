@@ -169,7 +169,8 @@ public sealed partial class AiIntentService(
                 {
                     ToolCalls = toolCalls,
                     ConversationContext = convCtx,
-                    ReportedTokenCount = round.ReportedTokenCount
+                    ReportedTokenCount = round.ReportedTokenCount,
+                    IsTruncated = round.IsTruncated
                 });
             }
 
@@ -180,7 +181,8 @@ public sealed partial class AiIntentService(
             return Result.Success(new AiResponse
             {
                 TextMessage = round.Text,
-                ReportedTokenCount = round.ReportedTokenCount
+                ReportedTokenCount = round.ReportedTokenCount,
+                IsTruncated = round.IsTruncated
             });
         }
         catch (JsonException ex)
@@ -211,12 +213,16 @@ public sealed partial class AiIntentService(
         messages.Add(new AssistantChatMessage(result));
 
         if (result.FinishReason == ChatFinishReason.ToolCalls && result.ToolCalls.Count > 0)
-            return new CompletedRound(null, result.ToolCalls, reportedTokenCount);
+            return new CompletedRound(null, result.ToolCalls, reportedTokenCount, IsTruncated: false);
 
         if (result.FinishReason == ChatFinishReason.Length)
             LogResponseTruncated(logger);
 
-        return new CompletedRound(result.Content.FirstOrDefault()?.Text, [], reportedTokenCount);
+        return new CompletedRound(
+            result.Content.FirstOrDefault()?.Text,
+            [],
+            reportedTokenCount,
+            result.FinishReason == ChatFinishReason.Length);
     }
 
     private async Task<CompletedRound> CompleteStreamingRoundAsync(
@@ -258,7 +264,7 @@ public sealed partial class AiIntentService(
 
             var toolCalls = toolCallBuilders.Values.Select(builder => builder.Build()).ToList();
             messages.Add(new AssistantChatMessage(toolCalls));
-            return new CompletedRound(null, toolCalls, reportedTokenCount);
+            return new CompletedRound(null, toolCalls, reportedTokenCount, IsTruncated: false);
         }
 
         if (finishReason == ChatFinishReason.Length)
@@ -268,7 +274,7 @@ public sealed partial class AiIntentService(
         if (!string.IsNullOrWhiteSpace(text))
             messages.Add(new AssistantChatMessage(text));
 
-        return new CompletedRound(text, [], reportedTokenCount);
+        return new CompletedRound(text, [], reportedTokenCount, finishReason == ChatFinishReason.Length);
     }
 
     private async Task<bool> AppendContentDeltasAsync(
@@ -326,7 +332,8 @@ public sealed partial class AiIntentService(
     private sealed record CompletedRound(
         string? Text,
         IReadOnlyList<ChatToolCall> ToolCalls,
-        int ReportedTokenCount);
+        int ReportedTokenCount,
+        bool IsTruncated);
 
     private sealed class StreamingToolCallBuilder
     {

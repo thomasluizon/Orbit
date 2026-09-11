@@ -106,6 +106,8 @@ public partial class ProcessUserChatCommandHandler(
     private const string DescribeFeatureToolName = "describe_feature";
     private const string EnglishToolFailureMessage = "I couldn't complete that. Please try again.";
     private const string PortugueseToolFailureMessage = "Não consegui concluir isso. Tente novamente.";
+    private const string EnglishTruncationMessage = "This response was cut off before completion, so the result is partial.";
+    private const string PortugueseTruncationMessage = "Esta resposta foi interrompida antes da conclusão, então o resultado é parcial.";
 
     private const int MaxSupportMessageLength = 5000;
 
@@ -171,8 +173,11 @@ public partial class ProcessUserChatCommandHandler(
         if (toolLoopResult.TokenBudgetExceeded && string.IsNullOrWhiteSpace(aiResponse.TextMessage))
             return Result.Failure<ChatResponse>(ErrorMessages.AiUnavailable);
 
+        var responseText = StripJsonWrapper(aiResponse.TextMessage);
+        if (aiResponse.IsTruncated)
+            responseText = AppendTruncationNotice(responseText, userLanguage);
         var (aiMessage, habitList, goalList, metricsCard) = await BuildResponseCardsAsync(
-            StripJsonWrapper(aiResponse.TextMessage), request, context, cancellationToken);
+            responseText, request, context, cancellationToken);
 
         if (faqMatch is { } faqToCache
             && !string.IsNullOrWhiteSpace(aiMessage)
@@ -224,6 +229,14 @@ public partial class ProcessUserChatCommandHandler(
     }
 
     private static string? GetUserLanguage(User? user) => user?.Language;
+
+    private static string AppendTruncationNotice(string? text, string? language)
+    {
+        var notice = LocaleHelper.IsPortuguese(language)
+            ? PortugueseTruncationMessage
+            : EnglishTruncationMessage;
+        return string.IsNullOrWhiteSpace(text) ? notice : $"{text}\n\n{notice}";
+    }
 
     private async Task<(string? AiMessage, HabitListCard? HabitList, GoalListCard? GoalList, MetricsCard? MetricsCard)> BuildResponseCardsAsync(
         string? aiMessage,

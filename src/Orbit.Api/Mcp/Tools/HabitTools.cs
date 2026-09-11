@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Security.Claims;
+using System.Text.Json;
 using MediatR;
 using ModelContextProtocol.Server;
 using Orbit.Api.Mcp;
@@ -272,11 +273,13 @@ public class HabitTools(IMediator mediator, IUserDateService userDateService, Mc
         if (logs.Count == 0)
             return "No logs found for this habit.";
 
-        var lines = logs.Take(50).Select(l =>
+        var returnedLogs = logs.Take(50).ToList();
+        var partial = returnedLogs.Count < logs.Count;
+        var lines = returnedLogs.Select(l =>
             $"- {l.Date:yyyy-MM-dd}" +
             $" (id: {l.Id})");
 
-        return $"Logs ({logs.Count} total, showing up to 50):\n{string.Join("\n", lines)}";
+        return $"Logs (total: {logs.Count}, returned: {returnedLogs.Count}, partial: {partial.ToString().ToLowerInvariant()}):\n{string.Join("\n", lines)}";
     }
 
     [McpServerTool(Name = "get_all_habit_logs"), Description("Get completion logs for all habits within a date range, grouped by habit ID.")]
@@ -297,10 +300,16 @@ public class HabitTools(IMediator mediator, IUserDateService userDateService, Mc
         if (grouped.Count == 0)
             return "No logs found for the given date range.";
 
-        var lines = grouped.Select(g =>
-            $"Habit {g.Key}: {g.Value.Count} logs ({string.Join(", ", g.Value.Take(10).Select(l => l.Date.ToString("yyyy-MM-dd")))})");
+        var totalLogs = grouped.Sum(group => group.Value.Count);
+        var returnedLogCount = grouped.Sum(group => Math.Min(group.Value.Count, 10));
+        var partial = returnedLogCount < totalLogs;
+        var lines = grouped.Select(group =>
+        {
+            var returned = group.Value.Take(10).ToList();
+            return $"Habit {group.Key}: total {group.Value.Count}, returned {returned.Count} ({string.Join(", ", returned.Select(log => log.Date.ToString("yyyy-MM-dd")))})";
+        });
 
-        return $"Logs for {grouped.Count} habits:\n{string.Join("\n", lines)}";
+        return $"Logs for {grouped.Count} habits (total_logs: {totalLogs}, returned_logs: {returnedLogCount}, partial: {partial.ToString().ToLowerInvariant()}):\n{string.Join("\n", lines)}";
     }
 
     [McpServerTool(Name = "create_sub_habit"), Description("Create a sub-habit under an existing parent habit. Requires Pro subscription.")]
@@ -383,57 +392,100 @@ public class HabitTools(IMediator mediator, IUserDateService userDateService, Mc
     [McpServerTool(Name = "bulk_delete_habits"), Description("Delete multiple habits at once.")]
     public async Task<string> BulkDeleteHabits(
         ClaimsPrincipal user,
-        [Description("Comma-separated habit IDs (GUIDs)")] string habitIds,
+        [Description("Comma-separated habit IDs (GUIDs). Omit when filterJson is provided.")] string? habitIds = null,
         [Description("Confirmation token returned by confirm_agent_operation_v2 (required: bulk delete is destructive)")] string? confirmationToken = null,
+        [Description("Optional JSON server-side filter used instead of habitIds")] string? filterJson = null,
         CancellationToken cancellationToken = default)
     {
-        var ids = McpToolHelpers.ParseGuidCsv(habitIds);
+        var ids = string.IsNullOrWhiteSpace(habitIds) ? [] : McpToolHelpers.ParseGuidCsv(habitIds);
+        var filter = string.IsNullOrWhiteSpace(filterJson) ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(filterJson);
 
         var result = await executorBridge.ExecuteAsync(user, "bulk_delete_habits", new
         {
-            habit_ids = ids.Select(id => id.ToString())
+            habit_ids = ids.Count > 0 ? ids.Select(id => id.ToString()) : null,
+            filter
         }, confirmationToken, cancellationToken);
 
         if (!result.Succeeded)
             return result.Message;
 
-        if (result.Payload is not BulkDeleteResult bulk)
-            return $"Bulk delete: {result.TargetName}";
+        return result.TargetName ?? "Bulk delete completed.";
+    }
 
-        var successCount = bulk.Results.Count(x => x.Status == BulkItemStatus.Success);
-        return $"Bulk delete: {successCount}/{ids.Count} deleted successfully";
+    [McpServerTool(Name = "bulk_update_habits"), Description("Update the full server-side set of habits matching a JSON filter in one operation.")]
+    public async Task<string> BulkUpdateHabits(
+        ClaimsPrincipal user,
+        [Description("JSON filter with all, habit_ids, tag, search, include_completed, is_general, is_bad_habit, or frequency")] string filterJson,
+        [Description("JSON object containing the habit fields to update")] string updatesJson,
+        [Description("Confirmation token returned by confirm_agent_operation_v2")] string? confirmationToken = null,
+        CancellationToken cancellationToken = default)
+    {
+        var filter = JsonSerializer.Deserialize<JsonElement>(filterJson);
+        var updates = JsonSerializer.Deserialize<JsonElement>(updatesJson);
+        var result = await executorBridge.ExecuteAsync(user, "bulk_update_habits", new
+        {
+            filter,
+            updates
+        }, confirmationToken, cancellationToken);
+
+        return result.Succeeded ? result.TargetName ?? "Bulk habit update completed." : result.Message;
+    }
+
+    [McpServerTool(Name = "bulk_reschedule_habits"), Description("Reschedule the full server-side set of habits matching a JSON filter in one operation.")]
+    public async Task<string> BulkRescheduleHabits(
+        ClaimsPrincipal user,
+        [Description("JSON filter with all, habit_ids, tag, search, include_completed, is_general, is_bad_habit, or frequency")] string filterJson,
+        [Description("New due date in YYYY-MM-DD format")] string dueDate,
+        [Description("Confirmation token returned by confirm_agent_operation_v2")] string? confirmationToken = null,
+        CancellationToken cancellationToken = default)
+    {
+        var filter = JsonSerializer.Deserialize<JsonElement>(filterJson);
+        var result = await executorBridge.ExecuteAsync(user, "bulk_reschedule_habits", new
+        {
+            filter,
+            due_date = dueDate
+        }, confirmationToken, cancellationToken);
+
+        return result.Succeeded ? result.TargetName ?? "Bulk habit reschedule completed." : result.Message;
     }
 
     [McpServerTool(Name = "bulk_log_habits"), Description("Log multiple habits as completed at once.")]
     public Task<string> BulkLogHabits(
         ClaimsPrincipal user,
-        [Description("Comma-separated habit IDs (GUIDs)")] string habitIds,
+        [Description("Comma-separated habit IDs (GUIDs). Omit when filterJson is provided.")] string? habitIds = null,
         [Description("Date to log for in YYYY-MM-DD format (defaults to today)")] string? date = null,
+        [Description("Optional JSON server-side filter used instead of habitIds")] string? filterJson = null,
         CancellationToken cancellationToken = default) =>
-        ExecuteBulkHabitOperationAsync(user, "bulk_log_habits", "Bulk log", habitIds, date, cancellationToken);
+        ExecuteBulkHabitOperationAsync(user, "bulk_log_habits", habitIds, date, filterJson, cancellationToken);
 
     [McpServerTool(Name = "bulk_skip_habits"), Description("Skip multiple habits at once.")]
     public Task<string> BulkSkipHabits(
         ClaimsPrincipal user,
-        [Description("Comma-separated habit IDs (GUIDs)")] string habitIds,
+        [Description("Comma-separated habit IDs (GUIDs). Omit when filterJson is provided.")] string? habitIds = null,
         [Description("Date to skip in YYYY-MM-DD format (defaults to today)")] string? date = null,
+        [Description("Optional JSON server-side filter used instead of habitIds")] string? filterJson = null,
         CancellationToken cancellationToken = default) =>
-        ExecuteBulkHabitOperationAsync(user, "bulk_skip_habits", "Bulk skip", habitIds, date, cancellationToken);
+        ExecuteBulkHabitOperationAsync(user, "bulk_skip_habits", habitIds, date, filterJson, cancellationToken);
 
     private async Task<string> ExecuteBulkHabitOperationAsync(
-        ClaimsPrincipal user, string operation, string resultLabel, string habitIds, string? date, CancellationToken cancellationToken)
+        ClaimsPrincipal user,
+        string operation,
+        string? habitIds,
+        string? date,
+        string? filterJson,
+        CancellationToken cancellationToken)
     {
-        var ids = McpToolHelpers.ParseGuidCsv(habitIds);
+        var ids = string.IsNullOrWhiteSpace(habitIds) ? [] : McpToolHelpers.ParseGuidCsv(habitIds);
+        var filter = string.IsNullOrWhiteSpace(filterJson) ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(filterJson);
 
         var result = await executorBridge.ExecuteAsync(user, operation, new
         {
-            habit_ids = ids.Select(id => id.ToString()),
+            habit_ids = ids.Count > 0 ? ids.Select(id => id.ToString()) : null,
+            filter,
             date
         }, confirmationToken: null, cancellationToken);
 
-        return result.Succeeded
-            ? $"{resultLabel}: {ids.Count} habit(s) processed ({result.TargetName})"
-            : result.Message;
+        return result.Succeeded ? result.TargetName ?? "Bulk habit operation completed." : result.Message;
     }
 
     [McpServerTool(Name = "reorder_habits"), Description("Reorder habits by setting new positions.")]

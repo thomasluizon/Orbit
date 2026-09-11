@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Microsoft.EntityFrameworkCore;
 using Orbit.Domain.Entities;
 using Orbit.Domain.Interfaces;
 
@@ -44,87 +43,6 @@ internal static class HabitToolHelpers
         },
         required = new[] { "habit_id" }
     };
-
-    /// <summary>Schema for a bulk-habit action taking a required <c>habit_ids</c> array and an optional <c>date</c>.</summary>
-    public static object BulkHabitActionSchema(string idsDescription, string dateDescription) => new
-    {
-        type = JsonSchemaTypes.Object,
-        properties = new
-        {
-            habit_ids = new
-            {
-                type = JsonSchemaTypes.Array,
-                items = new { type = JsonSchemaTypes.String },
-                description = idsDescription
-            },
-            date = new
-            {
-                type = JsonSchemaTypes.String,
-                nullable = true,
-                description = dateDescription
-            }
-        },
-        required = new[] { "habit_ids" }
-    };
-
-    public static (List<Guid> HabitIds, ToolResult? Error) ParseHabitIds(JsonElement args)
-    {
-        if (!args.TryGetProperty("habit_ids", out var idsEl) || idsEl.ValueKind != JsonValueKind.Array)
-            return (new List<Guid>(), new ToolResult(false, Error: "habit_ids is required and must be an array of GUIDs."));
-
-        var habitIds = new List<Guid>();
-        foreach (var el in idsEl.EnumerateArray())
-        {
-            if (Guid.TryParse(el.GetString(), out var id))
-                habitIds.Add(id);
-        }
-
-        if (habitIds.Count == 0)
-            return (habitIds, new ToolResult(false, Error: "No valid habit IDs provided."));
-
-        return (habitIds, null);
-    }
-
-    /// <summary>
-    /// Runs a bulk habit action end to end: parses <c>habit_ids</c>, resolves the target date, loads the
-    /// requested habits with their logs, applies <paramref name="tryApply"/> (given the habit, target date,
-    /// and today) to each in request order, and returns a result naming the habits the action succeeded on,
-    /// or <paramref name="noneAppliedError"/> when none did.
-    /// </summary>
-    public static async Task<ToolResult> RunBulkHabitActionAsync(
-        IGenericRepository<Habit> habitRepository,
-        IUserDateService userDateService,
-        JsonElement args,
-        Guid userId,
-        string noneAppliedError,
-        Func<Habit, DateOnly, DateOnly, Task<bool>> tryApply,
-        CancellationToken ct)
-    {
-        var (habitIds, parseError) = ParseHabitIds(args);
-        if (parseError is not null)
-            return parseError;
-
-        var today = await userDateService.GetUserTodayAsync(userId, ct);
-        var targetDate = JsonArgumentParser.ParseDateOnly(args, "date") ?? today;
-
-        var habits = await habitRepository.FindTrackedAsync(
-            h => habitIds.Contains(h.Id) && h.UserId == userId,
-            q => q.Include(h => h.Logs),
-            ct);
-
-        var appliedTitles = new List<string>();
-        foreach (var habitId in habitIds)
-        {
-            var habit = habits.FirstOrDefault(h => h.Id == habitId);
-            if (habit is not null && await tryApply(habit, targetDate, today))
-                appliedTitles.Add(habit.Title);
-        }
-
-        if (appliedTitles.Count == 0)
-            return new ToolResult(false, Error: noneAppliedError);
-
-        return new ToolResult(true, EntityName: string.Join(", ", appliedTitles));
-    }
 
     /// <summary>
     /// Resolves tag names to entities, reusing the user's existing tags (case-insensitive, capitalized)

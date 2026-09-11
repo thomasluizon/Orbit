@@ -239,8 +239,8 @@ public partial class AgentCatalogService
                 isMutation: true,
                 isPhaseOneReadOnly: false,
                 AgentConfirmationRequirement.FreshConfirmation,
-                chatTools: ["bulk_log_habits", "bulk_skip_habits", "bulk_create_habits"],
-                mcpTools: ["bulk_create_habits", "bulk_log_habits", "bulk_skip_habits"],
+                chatTools: ["bulk_update_habits", "bulk_reschedule_habits", "bulk_log_habits", "bulk_skip_habits", "bulk_create_habits"],
+                mcpTools: ["bulk_update_habits", "bulk_reschedule_habits", "bulk_create_habits", "bulk_log_habits", "bulk_skip_habits"],
                 controllerActions: ["HabitsController.BulkCreate", "HabitsController.BulkLog", "HabitsController.BulkSkip"]),
 
             CreateCapability(

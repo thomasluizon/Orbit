@@ -23,6 +23,7 @@ public static partial class ServiceCollectionExtensions
         builder.Services.AddScoped<IAudioTranscriptionService, AudioTranscriptionService>();
         builder.Services.AddScoped<IAiIntentService, AiIntentService>();
         builder.Services.AddScoped<IFactExtractionService, AiFactExtractionService>();
+        builder.Services.AddScoped<IHabitEmojiInferenceService, AiHabitEmojiInferenceService>();
         builder.Services.AddScoped<ISummaryService, AiSummaryService>();
         builder.Services.AddScoped<IRescheduleSuggestionService, AiRescheduleSuggestionService>();
         builder.Services.AddScoped<IHabitSuggestionService, AiHabitSuggestionService>();
@@ -55,6 +56,8 @@ public static partial class ServiceCollectionExtensions
         builder.Services.AddScoped<IAiTool, SuggestBreakdownTool>();
         builder.Services.AddScoped<IAiTool, DuplicateHabitTool>();
         builder.Services.AddScoped<IAiTool, MoveHabitTool>();
+        builder.Services.AddScoped<IAiTool, BulkUpdateHabitsTool>();
+        builder.Services.AddScoped<IAiTool, BulkRescheduleHabitsTool>();
         builder.Services.AddScoped<IAiTool, BulkUpdateHabitEmojisTool>();
         builder.Services.AddScoped<IAiTool, BulkLogHabitsTool>();
         builder.Services.AddScoped<IAiTool, BulkSkipHabitsTool>();

@@ -1,47 +1,53 @@
 using System.Text.Json;
 using MediatR;
 using Orbit.Application.Habits.Commands;
+using Orbit.Domain.Entities;
+using Orbit.Domain.Interfaces;
 
 namespace Orbit.Application.Chat.Tools.Implementations;
 
-public class BulkDeleteHabitsTool(
-    IMediator mediator) : IAiTool
+public sealed class BulkDeleteHabitsTool(
+    IMediator mediator,
+    IGenericRepository<Habit> habitRepository) : IAiTool
 {
     public string Name => "bulk_delete_habits";
 
     public string Description =>
-        "Permanently delete multiple habits in a single operation. Only delete habits the user explicitly asked to remove.";
+        "Permanently delete the complete server-side set of habits matching a filter in one operation. Only delete habits the user explicitly asked to remove. Reports applied, matched, skipped, and partial counts.";
 
     public object GetParameterSchema() => new
     {
         type = JsonSchemaTypes.Object,
         properties = new
         {
+            filter = BulkHabitToolArguments.FilterSchema(),
             habit_ids = new
             {
                 type = JsonSchemaTypes.Array,
-                description = "IDs of the habits to delete.",
+                description = "Legacy array of habit IDs to delete.",
                 items = new { type = JsonSchemaTypes.String }
             }
         },
-        required = new[] { "habit_ids" }
+        required = Array.Empty<string>()
     };
 
     public async Task<ToolResult> ExecuteAsync(JsonElement args, Guid userId, CancellationToken ct)
     {
-        if (!args.TryGetProperty("habit_ids", out var idsEl) || idsEl.ValueKind != JsonValueKind.Array)
-            return new ToolResult(false, Error: "habit_ids is required and must be an array.");
+        var (filter, filterError) = BulkHabitToolArguments.ParseActionFilter(args);
+        if (filterError is not null)
+            return new ToolResult(false, Error: filterError);
 
-        var habitIds = JsonArgumentParser.ParseGuidArray(args, "habit_ids") ?? new List<Guid>();
-        if (habitIds.Count == 0)
-            return new ToolResult(false, Error: "No valid habit IDs provided.");
+        var habits = await BulkHabitSelection.LoadAsync(habitRepository, userId, filter!, ct);
+        if (habits.Count == 0)
+            return new ToolResult(false, Error: "No matching habits found to delete.");
 
-        var result = await mediator.Send(new BulkDeleteHabitsCommand(userId, habitIds), ct);
-
-        if (result.IsFailure)
-            return ToolResult.FromFailure(result);
-
-        var successCount = result.Value.Results.Count(item => item.Status == BulkItemStatus.Success);
-        return new ToolResult(true, EntityName: $"{successCount}/{habitIds.Count} habits deleted", Payload: result.Value);
+        return await BulkUpdateHabitsTool.ExecuteInChunksAsync(
+            habits.Select(habit => habit.Id).ToList(),
+            (habitIds, cancellationToken) => mediator.Send(
+                new BulkDeleteHabitsCommand(userId, habitIds),
+                cancellationToken),
+            result => result.Results.Count(item => item.Status == BulkItemStatus.Success),
+            "Deleted",
+            ct);
     }
 }

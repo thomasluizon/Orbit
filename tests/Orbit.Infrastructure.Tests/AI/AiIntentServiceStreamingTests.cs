@@ -270,6 +270,7 @@ public class AiIntentServiceStreamingTests
 
         result.IsSuccess.Should().BeTrue();
         result.Value.TextMessage.Should().Be("partial list");
+        result.Value.IsTruncated.Should().BeTrue();
         logger.WarningEventIds.Should().Contain(8);
     }
 
@@ -284,6 +285,7 @@ public class AiIntentServiceStreamingTests
 
         result.IsSuccess.Should().BeTrue();
         result.Value.TextMessage.Should().Be("partial");
+        result.Value.IsTruncated.Should().BeTrue();
         logger.WarningEventIds.Should().Contain(8);
     }
 

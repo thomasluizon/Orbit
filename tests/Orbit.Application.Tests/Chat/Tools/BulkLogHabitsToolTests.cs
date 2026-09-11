@@ -5,6 +5,7 @@ using MediatR;
 using NSubstitute;
 using Orbit.Application.Chat.Tools;
 using Orbit.Application.Chat.Tools.Implementations;
+using Orbit.Application.Common;
 using Orbit.Application.Habits.Commands;
 using Orbit.Domain.Common;
 using Orbit.Domain.Entities;
@@ -38,7 +39,7 @@ public class BulkLogHabitsToolTests
     }
 
     [Fact]
-    public async Task LogMultiple_ReturnsLoggedNames()
+    public async Task LogMultiple_ReturnsHonestCounts()
     {
         var h1 = CreateHabit("Water");
         var h2 = CreateHabit("Exercise");
@@ -47,8 +48,8 @@ public class BulkLogHabitsToolTests
         var result = await Execute($$$"""{"habit_ids": ["{{{h1.Id}}}", "{{{h2.Id}}}"]}""");
 
         result.Success.Should().BeTrue();
-        result.EntityName.Should().Contain("Water");
-        result.EntityName.Should().Contain("Exercise");
+        result.EntityName.Should().Contain("Logged 2 of 2");
+        result.EntityName.Should().Contain("Complete result");
         await _mediator.Received(1).Send(
             Arg.Is<BulkLogHabitsCommand>(command => command.Items.Count == 2),
             Arg.Any<CancellationToken>());
@@ -63,7 +64,7 @@ public class BulkLogHabitsToolTests
         var result = await Execute($$$"""{"habit_ids": ["{{{h1.Id}}}", "{{{missingId}}}"]}""");
 
         result.Success.Should().BeTrue();
-        result.EntityName.Should().Contain("Water");
+        result.EntityName.Should().Contain("Logged 1 of 1");
     }
 
     [Fact]
@@ -74,7 +75,7 @@ public class BulkLogHabitsToolTests
         var result = await Execute($$$"""{"habit_ids": ["{{{id1}}}"]}""");
 
         result.Success.Should().BeFalse();
-        result.Error.Should().Contain("No habits were logged");
+        result.Error.Should().Contain("No matching habits");
     }
 
     [Fact]
@@ -91,8 +92,8 @@ public class BulkLogHabitsToolTests
         var result = await Execute($$$"""{"habit_ids": ["{{{logged.Id}}}", "{{{fresh.Id}}}"]}""");
 
         result.Success.Should().BeTrue();
-        result.EntityName.Should().Contain("Exercise");
-        result.EntityName.Should().NotContain("Water");
+        result.EntityName.Should().Contain("Logged 1 of 2");
+        result.EntityName.Should().Contain("Partial result");
     }
 
     [Fact]
@@ -101,7 +102,7 @@ public class BulkLogHabitsToolTests
         var result = await Execute("""{"habit_ids": []}""");
 
         result.Success.Should().BeFalse();
-        result.Error.Should().Contain("No valid habit IDs");
+        result.Error.Should().Contain("habit_ids");
     }
 
     [Fact]
@@ -110,7 +111,7 @@ public class BulkLogHabitsToolTests
         var result = await Execute("{}");
 
         result.Success.Should().BeFalse();
-        result.Error.Should().Contain("habit_ids is required");
+        result.Error.Should().Contain("filter or habit_ids");
     }
 
     [Fact]
@@ -136,8 +137,53 @@ public class BulkLogHabitsToolTests
         var attackerResult = await _tool.ExecuteAsync(ArgsFor(habit.Id), attackerId, CancellationToken.None);
 
         attackerResult.Success.Should().BeFalse();
-        attackerResult.Error.Should().Contain("No habits were logged");
+        attackerResult.Error.Should().Contain("No matching habits");
         await _mediator.DidNotReceive().Send(Arg.Any<BulkLogHabitsCommand>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task AllFilter_LogsEveryMatchAcrossBoundedCommands()
+    {
+        var habits = Enumerable.Range(1, 205).Select(index => CreateHabit($"Habit {index}")).ToArray();
+        var chunkSizes = new List<int>();
+        SetupHabitsFound(habits);
+        _mediator.Send(Arg.Any<BulkLogHabitsCommand>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var command = call.Arg<BulkLogHabitsCommand>();
+                chunkSizes.Add(command.Items.Count);
+                return Result.Success(new BulkLogResult(command.Items.Select((item, index) =>
+                    new BulkLogItemResult(index, BulkItemStatus.Success, item.HabitId, Guid.NewGuid())).ToList()));
+            });
+
+        var result = await Execute("""{"filter":{"all":true}}""");
+
+        result.EntityName.Should().Contain("Logged 205 of 205");
+        chunkSizes.Should().Equal(AppConstants.MaxBulkOperationSize, AppConstants.MaxBulkOperationSize, 5);
+    }
+
+    [Fact]
+    public async Task LaterChunkFailure_ReportsOnlyCommittedMatchesAsPartial()
+    {
+        var habits = Enumerable.Range(1, 205).Select(index => CreateHabit($"Habit {index}")).ToArray();
+        var commandCount = 0;
+        SetupHabitsFound(habits);
+        _mediator.Send(Arg.Any<BulkLogHabitsCommand>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                commandCount++;
+                var command = call.Arg<BulkLogHabitsCommand>();
+                return commandCount == 2
+                    ? Result.Failure<BulkLogResult>("write failed")
+                    : Result.Success(new BulkLogResult(command.Items.Select((item, index) =>
+                        new BulkLogItemResult(index, BulkItemStatus.Success, item.HabitId, Guid.NewGuid())).ToList()));
+            });
+
+        var result = await Execute("""{"filter":{"all":true}}""");
+
+        result.EntityName.Should().Contain("Logged 100 of 205");
+        result.EntityName.Should().Contain("Partial result");
+        commandCount.Should().Be(2);
     }
 
     private static JsonElement ArgsFor(Guid habitId) =>
@@ -150,8 +196,9 @@ public class BulkLogHabitsToolTests
 
     private void SetupHabitsFound(params Habit[] habits)
     {
-        _habitRepo.FindAsync(
+        _habitRepo.FindTrackedAsync(
             Arg.Any<Expression<Func<Habit, bool>>>(),
+            Arg.Any<Func<IQueryable<Habit>, IQueryable<Habit>>>(),
             Arg.Any<CancellationToken>()
         ).Returns(callInfo =>
         {

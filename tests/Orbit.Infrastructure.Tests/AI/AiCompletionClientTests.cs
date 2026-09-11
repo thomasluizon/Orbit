@@ -41,6 +41,20 @@ public class AiCompletionClientTests
     }
 
     [Fact]
+    public async Task CompleteJsonAsync_WithUserId_AttributesRecordedUsage()
+    {
+        var handler = new CapturingHandler();
+        var usageRecorder = Substitute.For<IAiUsageRecorder>();
+        var client = new AiCompletionClient(BuildChatClient(handler), NullLogger<AiCompletionClient>.Instance, usageRecorder);
+        var userId = Guid.NewGuid();
+
+        await client.CompleteJsonAsync<Probe>("system", "user", userId: userId);
+
+        await usageRecorder.Received(1).RecordAsync(
+            "json", "primary-test", 0, 1, 2, 3, Arg.Any<CancellationToken>(), userId);
+    }
+
+    [Fact]
     public void ResolveSubTaskModel_EmptyConfig_FallsBackToPrimary()
     {
         AiCompletionClient.ResolveSubTaskModel("", "gpt-4.1-mini").Should().Be("gpt-4.1-mini");

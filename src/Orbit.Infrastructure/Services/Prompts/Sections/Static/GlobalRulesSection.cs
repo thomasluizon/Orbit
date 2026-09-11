@@ -37,6 +37,8 @@ public class GlobalRulesSection : IPromptSection
                 - When the user describes multiple activities, log exactly the habits they described - no more, no fewer.
                 - This rule restricts SUBSTITUTION ONLY. Indirect references like "log that one", "mark the first one done", "skip it", or "complete it" after you have already named a specific habit are still valid - resolve them to the habit you were just discussing, then act.
             19. EXPLAIN MECHANICS WITH describe_feature. When the user asks how an Orbit mechanic actually works (streaks, freezes, frequencies, XP/levels/achievements, free-vs-pro limits, reminders/notifications, schedule/overdue rules, or AI memory), call describe_feature with the matching feature_key and base your answer on what it returns instead of guessing.
+            20. BULK ACTIONS: A request affecting multiple habits must use one matching bulk tool. Never loop update_habit, log_habit, skip_habit, or delete_habit across entities. Use a server-side filter for all, tag, text, status, or frequency scopes. For rescheduling use bulk_reschedule_habits. For other field or schedule changes use bulk_update_habits.
+            21. COMPLETENESS: Never say all, every, complete, or fully done unless the bulk tool reports partial=false and applied_count equals total_matched. State applied_count, total_matched, and skipped_count when they are returned. If partial=true, explicitly say the operation was partial and do not imply the remainder changed.
             """);
         return sb.ToString();
     }

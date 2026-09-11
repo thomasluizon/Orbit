@@ -1,29 +1,38 @@
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using Orbit.Application.Habits.Commands;
 using Orbit.Domain.Common;
 using Orbit.Domain.Entities;
-using Orbit.Domain.Enums;
 using Orbit.Domain.Interfaces;
 
 namespace Orbit.Application.Chat.Tools.Implementations;
 
-public class BulkUpdateHabitEmojisTool(
-    IGenericRepository<Habit> habitRepository) : IAiTool
+public sealed partial class BulkUpdateHabitEmojisTool(
+    IGenericRepository<Habit> habitRepository,
+    IHabitEmojiInferenceService inferenceService,
+    IUnitOfWork unitOfWork,
+    ILogger<BulkUpdateHabitEmojisTool> logger) : IAiTool
 {
+    internal const int InferenceChunkSize = 25;
+
     public string Name => "bulk_update_habit_emojis";
 
     public string Description =>
-        "Update emojis for many habits in one operation. Use this when the user asks to change all habit emojis to sensible ones, or to set the same requested emoji on multiple habits.";
+        "Update emojis for the complete server-side set of habits matching a filter. Infer distinct sensible emojis in bounded AI batches, or apply one explicitly requested emoji. Reports applied, matched, skipped, and partial counts.";
 
     public object GetParameterSchema() => new
     {
         type = JsonSchemaTypes.Object,
         properties = new
         {
+            filter = BulkHabitToolArguments.FilterSchema(),
             habit_ids = new
             {
                 type = JsonSchemaTypes.Array,
                 items = new { type = JsonSchemaTypes.String },
-                description = "Optional habit IDs to update. Omit to update all active habits owned by the user."
+                description = "Legacy selection. Omit to update all active habits, or use filter for server-side predicates."
             },
             emoji = new
             {
@@ -34,12 +43,12 @@ public class BulkUpdateHabitEmojisTool(
             infer_from_title = new
             {
                 type = JsonSchemaTypes.Boolean,
-                description = "When true, choose a sensible emoji from each habit title and description. Defaults to true when emoji is omitted."
+                description = "Infer one sensible emoji from each title and description. Defaults to true when emoji is omitted."
             },
             include_completed = new
             {
                 type = JsonSchemaTypes.Boolean,
-                description = "When true, also update completed habits. Defaults to false."
+                description = "Legacy selection option. Include completed habits when filter is omitted. Defaults to false."
             }
         },
         required = Array.Empty<string>()
@@ -47,84 +56,109 @@ public class BulkUpdateHabitEmojisTool(
 
     public async Task<ToolResult> ExecuteAsync(JsonElement args, Guid userId, CancellationToken ct)
     {
-        var habitIds = ParseHabitIds(args, out var habitIdsError);
-        if (habitIdsError is not null)
-            return new ToolResult(false, Error: habitIdsError);
+        var (filter, filterError) = BulkHabitToolArguments.ParseEmojiFilter(args);
+        if (filterError is not null)
+            return new ToolResult(false, Error: filterError);
 
-        var includeCompleted = JsonArgumentParser.GetOptionalBool(args, "include_completed") ?? false;
         var hasEmojiArgument = JsonArgumentParser.PropertyExists(args, "emoji");
         var requestedEmoji = hasEmojiArgument ? JsonArgumentParser.GetNullableString(args, "emoji") : null;
         var inferFromTitle = JsonArgumentParser.GetOptionalBool(args, "infer_from_title") ?? !hasEmojiArgument;
-
         if (!inferFromTitle && !hasEmojiArgument)
             return new ToolResult(false, Error: "Provide emoji or set infer_from_title to true.");
 
-        var habits = await habitRepository.FindTrackedAsync(
-            habit => habit.UserId == userId
-                && (habitIds.Count == 0 || habitIds.Contains(habit.Id))
-                && (includeCompleted || !habit.IsCompleted),
-            ct);
-
+        var habits = await BulkHabitSelection.LoadAsync(habitRepository, userId, filter!, ct);
         if (habits.Count == 0)
             return new ToolResult(false, Error: "No matching habits found to update.");
 
-        return UpdateHabitEmojis(habits, inferFromTitle, requestedEmoji);
-    }
-
-    private static List<Guid> ParseHabitIds(JsonElement args, out string? error)
-    {
-        error = null;
-        if (!args.TryGetProperty("habit_ids", out var habitIdsElement))
-            return [];
-
-        if (habitIdsElement.ValueKind != JsonValueKind.Array)
+        var appliedCount = 0;
+        var stopped = false;
+        foreach (var chunk in habits.Chunk(InferenceChunkSize))
         {
-            error = "habit_ids must be omitted or provided as a non-empty array of valid habit IDs.";
-            return [];
-        }
-
-        var habitIds = new List<Guid>();
-        foreach (var habitIdElement in habitIdsElement.EnumerateArray())
-        {
-            if (habitIdElement.ValueKind != JsonValueKind.String ||
-                !Guid.TryParse(habitIdElement.GetString(), out var habitId))
+            IReadOnlyDictionary<Guid, string>? inferred = null;
+            if (inferFromTitle)
             {
-                error = "habit_ids must contain only valid habit IDs.";
-                return [];
+                var inferenceResult = await inferenceService.InferAsync(
+                    userId,
+                    chunk.Select(habit => new HabitEmojiInferenceInput(habit.Id, habit.Title, habit.Description)).ToList(),
+                    ct);
+                if (inferenceResult.IsFailure)
+                {
+                    LogInferenceStopped(logger, appliedCount, habits.Count, inferenceResult.Error);
+                    stopped = true;
+                    break;
+                }
+                inferred = inferenceResult.Value;
             }
 
-            habitIds.Add(habitId);
+            var chunkApplied = 0;
+            try
+            {
+                await unitOfWork.ExecuteInTransactionAsync(async transactionToken =>
+                {
+                    foreach (var habit in chunk)
+                    {
+                        string? emoji;
+                        if (inferFromTitle)
+                        {
+                            if (!inferred!.TryGetValue(habit.Id, out emoji) || !IsSingleEmojiGrapheme(emoji))
+                                continue;
+                        }
+                        else
+                        {
+                            emoji = requestedEmoji;
+                        }
+
+                        if (ApplyEmoji(habit, emoji).IsSuccess)
+                            chunkApplied++;
+                    }
+
+                    if (chunkApplied > 0)
+                        await unitOfWork.SaveChangesAsync(transactionToken);
+                }, ct);
+                appliedCount += chunkApplied;
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                unitOfWork.DiscardChanges();
+                LogChunkFailed(logger, appliedCount, habits.Count, exception);
+                stopped = true;
+                break;
+            }
         }
 
-        if (habitIds.Count == 0)
-            error = "habit_ids must contain at least one valid habit ID when provided.";
-
-        return habitIds;
+        var totalMatched = habits.Count;
+        var skippedCount = totalMatched - appliedCount;
+        var partial = stopped || skippedCount > 0;
+        return BulkUpdateHabitsTool.BuildResult(
+            new BulkHabitMutationResult(appliedCount, totalMatched, skippedCount, partial),
+            "Updated emojis for",
+            includeUpdatedCount: true);
     }
 
-    private static ToolResult UpdateHabitEmojis(
-        IReadOnlyList<Habit> habits,
-        bool inferFromTitle,
-        string? requestedEmoji)
+    [LoggerMessage(EventId = 1, Level = LogLevel.Warning, Message = "Bulk emoji inference stopped after {AppliedCount} of {TotalMatched} matches: {Reason}")]
+    private static partial void LogInferenceStopped(ILogger logger, int appliedCount, int totalMatched, string reason);
+
+    [LoggerMessage(EventId = 2, Level = LogLevel.Warning, Message = "Bulk emoji update chunk failed after {AppliedCount} of {TotalMatched} matches")]
+    private static partial void LogChunkFailed(ILogger logger, int appliedCount, int totalMatched, Exception ex);
+
+    internal static bool IsSingleEmojiGrapheme(string? value)
     {
-        var updated = new List<string>();
-        foreach (var habit in habits.OrderBy(habit => habit.Position ?? int.MaxValue).ThenBy(habit => habit.Title))
-        {
-            var nextEmoji = inferFromTitle ? InferEmoji(habit) : requestedEmoji;
-            var updateResult = ApplyEmoji(habit, nextEmoji);
-            if (updateResult.IsSuccess)
-                updated.Add($"{habit.Title} {nextEmoji ?? "cleared"}");
-        }
+        if (string.IsNullOrWhiteSpace(value) || !string.Equals(value, value.Trim(), StringComparison.Ordinal))
+            return false;
+        if (StringInfo.ParseCombiningCharacters(value).Length != 1)
+            return false;
 
-        if (updated.Count == 0)
-            return new ToolResult(false, Error: "No habit emojis were updated.");
+        return value.EnumerateRunes().Any(IsEmojiRune);
+    }
 
-        var preview = string.Join(", ", updated.Take(12));
-        var suffix = updated.Count > 12 ? $", and {updated.Count - 12} more" : string.Empty;
-        return new ToolResult(
-            true,
-            EntityName: $"Updated emojis for {updated.Count} habit(s): {preview}{suffix}",
-            Payload: new { updated_count = updated.Count });
+    private static bool IsEmojiRune(Rune rune)
+    {
+        var value = rune.Value;
+        return value is 0x00A9 or 0x00AE or 0x203C or 0x2049 or 0x2122 or 0x2139
+            || value is >= 0x2194 and <= 0x21FF
+            || value is >= 0x2300 and <= 0x23FF
+            || value is >= 0x2600 and <= 0x27BF
+            || value is >= 0x1F000 and <= 0x1FAFF;
     }
 
     private static Result ApplyEmoji(Habit habit, string? emoji)
@@ -150,37 +184,4 @@ public class BulkUpdateHabitEmojisTool(
             Emoji: emoji,
             IntervalWeeks: habit.IntervalWeeks));
     }
-
-    private static string InferEmoji(Habit habit)
-    {
-        var text = $"{habit.Title} {habit.Description}".ToLowerInvariant();
-        var match = InferenceRules.FirstOrDefault(rule => rule.Keywords.Any(text.Contains));
-        return match?.Emoji ?? "✨";
-    }
-
-    private static readonly IReadOnlyList<EmojiInferenceRule> InferenceRules =
-    [
-        new("🏋️", ["gym", "academia", "workout", "treino", "lift", "weights", "musculação", "exercise", "exercício"]),
-        new("💪", ["strength", "push-up", "pushup", "muscle", "força", "flexão"]),
-        new("🏃", ["run", "running", "corrida", "correr", "cardio"]),
-        new("🚶", ["walk", "walking", "caminhada", "andar", "steps", "passos"]),
-        new("🧘", ["meditate", "meditation", "mindfulness", "yoga", "meditar", "meditação"]),
-        new("💧", ["water", "hydrate", "hydration", "água", "beber água", "hidratar"]),
-        new("🥗", ["salad", "diet", "nutrition", "healthy", "nutrição", "dieta", "saudável"]),
-        new("🍳", ["cook", "cooking", "meal", "cozinhar", "refeição"]),
-        new("☕️", ["coffee", "café"]),
-        new("😴", ["sleep", "bed", "sono", "dormir", "bedtime"]),
-        new("📚", ["read", "book", "study", "learn", "ler", "livro", "estudar", "aprender"]),
-        new("✍️", ["write", "journal", "diary", "escrever", "diário", "journaling"]),
-        new("💻", ["code", "program", "work", "computer", "coding", "trabalho", "programar"]),
-        new("💊", ["medicine", "medication", "pill", "remédio", "medicamento", "vitamin"]),
-        new("🦷", ["teeth", "tooth", "floss", "brush", "dente", "escovar", "fio dental"]),
-        new("🧹", ["clean", "tidy", "chores", "limpar", "faxina", "arrumar"]),
-        new("🛒", ["shopping", "groceries", "market", "compras", "supermercado", "mercado"]),
-        new("💰", ["money", "budget", "finance", "dinheiro", "finanças", "orçamento"]),
-        new("🙏", ["pray", "prayer", "oração", "rezar"]),
-        new("🌱", ["plant", "garden", "nature", "planta", "jardim", "natureza"]),
-    ];
-
-    private sealed record EmojiInferenceRule(string Emoji, IReadOnlyList<string> Keywords);
 }

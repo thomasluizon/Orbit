@@ -141,6 +141,7 @@ public sealed partial class AiCompletionClient
         int? maxOutputTokens = null,
         string purpose = "json",
         AiModelTier tier = AiModelTier.Primary,
+        Guid? userId = null,
         CancellationToken cancellationToken = default)
     {
         var messages = new List<ChatMessage>
@@ -164,7 +165,7 @@ public sealed partial class AiCompletionClient
         var client = tier == AiModelTier.SubTask ? _subTaskChatClient : _chatClient;
         var model = tier == AiModelTier.SubTask ? _subTaskModel : _primaryModel;
         var completion = await client.CompleteChatAsync(messages, options, cancellationToken);
-        await RecordUsageAsync(completion.Value.Usage, purpose, model, cancellationToken);
+        await RecordUsageAsync(completion.Value.Usage, purpose, model, cancellationToken, userId);
         var text = completion.Value.Content.FirstOrDefault()?.Text;
 
         if (string.IsNullOrWhiteSpace(text))
@@ -179,7 +180,11 @@ public sealed partial class AiCompletionClient
     }
 
     private async Task RecordUsageAsync(
-        ChatTokenUsage? usage, string purpose, string model, CancellationToken cancellationToken)
+        ChatTokenUsage? usage,
+        string purpose,
+        string model,
+        CancellationToken cancellationToken,
+        Guid? userId = null)
     {
         if (usage is null)
             return;
@@ -202,7 +207,8 @@ public sealed partial class AiCompletionClient
             usage.InputTokenCount,
             usage.OutputTokenCount,
             usage.TotalTokenCount,
-            cancellationToken);
+            cancellationToken,
+            userId);
     }
 
     [LoggerMessage(EventId = 1, Level = LogLevel.Debug, Message = "Calling AI API for text completion...")]

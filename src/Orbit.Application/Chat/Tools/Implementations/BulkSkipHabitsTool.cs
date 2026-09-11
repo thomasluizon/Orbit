@@ -1,69 +1,60 @@
+using System.Globalization;
 using System.Text.Json;
-using Orbit.Application.Habits.Services;
+using MediatR;
+using Orbit.Application.Habits.Commands;
 using Orbit.Domain.Entities;
 using Orbit.Domain.Interfaces;
 
 namespace Orbit.Application.Chat.Tools.Implementations;
 
-public class BulkSkipHabitsTool(
+public sealed class BulkSkipHabitsTool(
+    IMediator mediator,
     IGenericRepository<Habit> habitRepository,
-    IGenericRepository<HabitLog> habitLogRepository,
     IUserDateService userDateService) : IAiTool
 {
     public string Name => "bulk_skip_habits";
 
     public string Description =>
-        "Skip multiple habits for today in a single operation. Use this only for habits the user EXPLICITLY mentioned skipping - never include extra habits that share a tag, parent, routine, or theme but were not named. For recurring habits, advances due date to next scheduled occurrence. For one-time tasks, postpones to tomorrow. Does not log completion. Works on habits that are due today or overdue.";
+        "Skip multiple habits from the complete server-side set matching a filter in one operation. Use only for habits the user explicitly described skipping. Reports applied, matched, skipped, and partial counts.";
 
-    public object GetParameterSchema() => HabitToolHelpers.BulkHabitActionSchema(
-        "Array of habit IDs to skip",
-        "Date to skip in YYYY-MM-DD format (defaults to today)");
+    public object GetParameterSchema() => BulkHabitToolArguments.ActionFilterSchema(
+        "Legacy array of habit IDs to skip.",
+        "Date to skip in YYYY-MM-DD format. Defaults to today.");
 
     public async Task<ToolResult> ExecuteAsync(JsonElement args, Guid userId, CancellationToken ct)
     {
-        var weekStartDay = await userDateService.GetUserWeekStartDayAsync(userId, ct);
+        var (filter, filterError) = BulkHabitToolArguments.ParseActionFilter(args);
+        if (filterError is not null)
+            return new ToolResult(false, Error: filterError);
+        var targetDateResult = await ResolveDateAsync(args, userId, ct);
+        if (targetDateResult.Error is not null)
+            return new ToolResult(false, Error: targetDateResult.Error);
 
-        return await HabitToolHelpers.RunBulkHabitActionAsync(
-            habitRepository, userDateService, args, userId,
-            "No habits were skipped. They may be completed, not yet due, or not found.",
-            (habit, targetDate, today) => TrySkipHabit(habit, targetDate, today, weekStartDay, ct),
+        var habits = await BulkHabitSelection.LoadAsync(habitRepository, userId, filter!, ct);
+        if (habits.Count == 0)
+            return new ToolResult(false, Error: "No matching habits found to skip.");
+
+        return await BulkUpdateHabitsTool.ExecuteInChunksAsync(
+            habits.Select(habit => new BulkSkipItem(habit.Id, targetDateResult.Date)).ToList(),
+            (items, cancellationToken) => mediator.Send(
+                new BulkSkipHabitsCommand(userId, items),
+                cancellationToken),
+            result => result.Results.Count(item => item.Status == BulkItemStatus.Success),
+            "Skipped",
             ct);
     }
 
-    private async Task<bool> TrySkipHabit(Habit habit, DateOnly targetDate, DateOnly today, int weekStartDay, CancellationToken ct)
+    private async Task<(DateOnly Date, string? Error)> ResolveDateAsync(
+        JsonElement args,
+        Guid userId,
+        CancellationToken cancellationToken)
     {
-        if (habit.IsCompleted)
-            return false;
-
-        if (habit.FrequencyUnit is null)
-        {
-            habit.PostponeTo(today.AddDays(1));
-            return true;
-        }
-
-        if (!habit.IsFlexible && habit.DueDate > targetDate)
-            return false;
-
-        if (!HabitScheduleService.IsHabitDueOnDate(habit, targetDate, weekStartDay))
-            return false;
-
-        if (habit.IsFlexible)
-        {
-            var remaining = HabitScheduleService.GetRemainingCompletions(habit, targetDate, habit.Logs, weekStartDay);
-            if (remaining <= 0)
-                return false;
-
-            var skipResult = habit.SkipFlexible(targetDate);
-            if (skipResult.IsFailure)
-                return false;
-
-            await habitLogRepository.AddAsync(skipResult.Value, ct);
-        }
-        else
-        {
-            habit.AdvanceDueDate(targetDate, weekStartDay);
-        }
-
-        return true;
+        var today = await userDateService.GetUserTodayAsync(userId, cancellationToken);
+        if (!args.TryGetProperty("date", out var dateElement) || dateElement.ValueKind == JsonValueKind.Null)
+            return (today, null);
+        if (dateElement.ValueKind != JsonValueKind.String
+            || !DateOnly.TryParseExact(dateElement.GetString(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+            return (default, "date must use YYYY-MM-DD format.");
+        return (date, null);
     }
 }
