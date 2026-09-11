@@ -68,7 +68,7 @@ public class BulkSkipHabitsToolTests
     {
         var id1 = Guid.NewGuid();
         var id2 = Guid.NewGuid();
-        _habitRepo.FindTrackedAsync(
+        _habitRepo.FindAsync(
             Arg.Any<Expression<Func<Habit, bool>>>(),
             Arg.Any<Func<IQueryable<Habit>, IQueryable<Habit>>?>(),
             Arg.Any<CancellationToken>()
@@ -115,6 +115,19 @@ public class BulkSkipHabitsToolTests
 
         result.Success.Should().BeFalse();
         result.Error.Should().Contain("filter or habit_ids");
+    }
+
+    [Fact]
+    public async Task ConflictingSelectors_ReturnsErrorBeforeLoadingTargets()
+    {
+        var habitId = Guid.NewGuid();
+
+        var result = await Execute($$$"""{"habit_ids":["{{{habitId}}}"],"filter":{"all":true}}""");
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain("cannot combine");
+        await _habitRepo.DidNotReceiveWithAnyArgs().FindAsync(default!, default!, default);
+        await _mediator.DidNotReceiveWithAnyArgs().Send(default(BulkSkipHabitsCommand)!, default);
     }
 
     [Fact]
@@ -175,7 +188,7 @@ public class BulkSkipHabitsToolTests
 
     private void SetupHabitLookup(params Habit[] habits)
     {
-        _habitRepo.FindTrackedAsync(
+        _habitRepo.FindAsync(
             Arg.Any<Expression<Func<Habit, bool>>>(),
             Arg.Any<Func<IQueryable<Habit>, IQueryable<Habit>>?>(),
             Arg.Any<CancellationToken>()

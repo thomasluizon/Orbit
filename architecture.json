@@ -2952,9 +2952,9 @@
       "Behaviors": 14,
       "Calendar": 16,
       "Challenges": 14,
-      "Chat": 62,
+      "Chat": 63,
       "ChecklistTemplates": 9,
-      "Common": 196,
+      "Common": 197,
       "Gamification": 43,
       "Goals": 54,
       "Habits": 93,
@@ -3438,6 +3438,13 @@
         "references": [
           "BulkDeleteHabitsCommand",
           "Habit"
+        ]
+      },
+      {
+        "testClass": "BulkHabitToolArgumentsTests",
+        "file": "tests/Orbit.Application.Tests/Chat/Tools/BulkHabitToolArgumentsTests.cs",
+        "references": [
+          "Tag"
         ]
       },
       {

@@ -45,9 +45,15 @@ internal static class BulkHabitToolArguments
 
     public static (BulkHabitFilter? Filter, string? Error) ParseActionFilter(JsonElement args)
     {
-        if (args.TryGetProperty("filter", out _))
+        var hasFilter = args.TryGetProperty("filter", out var filterElement)
+            && filterElement.ValueKind != JsonValueKind.Null;
+        var hasHabitIds = args.TryGetProperty("habit_ids", out var habitIdsElement)
+            && habitIdsElement.ValueKind != JsonValueKind.Null;
+        if (hasFilter && hasHabitIds)
+            return (null, "filter cannot combine with habit_ids.");
+        if (hasFilter)
             return ParseRequiredFilter(args);
-        if (!args.TryGetProperty("habit_ids", out _))
+        if (!hasHabitIds)
             return (null, "Provide filter or habit_ids.");
 
         var (filter, error) = ParseEmojiFilter(args);
@@ -155,7 +161,7 @@ internal static class BulkHabitToolArguments
             habit_ids = new { type = JsonSchemaTypes.Array, items = new { type = JsonSchemaTypes.String } },
             tag = new { type = JsonSchemaTypes.String, description = "Exact tag name, case-insensitive." },
             search = new { type = JsonSchemaTypes.String, description = "Title or description contains text, case-insensitive." },
-            include_completed = new { type = JsonSchemaTypes.Boolean, description = "Include completed habits. Default false." },
+            is_completed = new { type = JsonSchemaTypes.Boolean, description = "Select completed habits when true or active habits when false. Active habits are the default." },
             is_general = new { type = JsonSchemaTypes.Boolean },
             is_bad_habit = new { type = JsonSchemaTypes.Boolean },
             frequency = new { type = JsonSchemaTypes.String, @enum = new[] { "Day", "Week", "Month", "Year", "OneTime" } }
@@ -166,11 +172,11 @@ internal static class BulkHabitToolArguments
     {
         var allowed = new HashSet<string>(StringComparer.Ordinal)
         {
-            "all", "habit_ids", "tag", "search", "include_completed", "is_general", "is_bad_habit", "frequency"
+            "all", "habit_ids", "tag", "search", "is_completed", "is_general", "is_bad_habit", "frequency"
         };
         if (filter.EnumerateObject().Any(property => !allowed.Contains(property.Name)))
             return (null, "filter contains an unsupported field.");
-        foreach (var booleanName in new[] { "all", "include_completed", "is_general", "is_bad_habit" })
+        foreach (var booleanName in new[] { "all", "is_completed", "is_general", "is_bad_habit" })
         {
             if (filter.TryGetProperty(booleanName, out var booleanValue)
                 && booleanValue.ValueKind is not JsonValueKind.True and not JsonValueKind.False)
@@ -213,13 +219,13 @@ internal static class BulkHabitToolArguments
         var result = new BulkHabitFilter(
             All: JsonArgumentParser.GetOptionalBool(filter, "all") ?? false,
             HabitIds: ids,
-            IncludeCompleted: JsonArgumentParser.GetOptionalBool(filter, "include_completed") ?? false,
             Tag: JsonArgumentParser.GetNullableString(filter, "tag"),
             Search: JsonArgumentParser.GetNullableString(filter, "search"),
             IsGeneral: JsonArgumentParser.GetOptionalBool(filter, "is_general"),
             IsBadHabit: JsonArgumentParser.GetOptionalBool(filter, "is_bad_habit"),
             Frequency: frequency,
-            OneTime: oneTime);
+            OneTime: oneTime,
+            IsCompleted: JsonArgumentParser.GetOptionalBool(filter, "is_completed"));
 
         if (result.All && result.HabitIds.Count > 0)
             return (null, "filter cannot combine all=true with habit_ids.");

@@ -24,6 +24,9 @@ internal static class HabitInvariants
         if (isGeneral && isBadHabit)
             return DomainErrors.GeneralHabitIsBadHabit;
 
+        if (frequencyUnit is not null && frequencyQuantity is null)
+            return DomainErrors.FrequencyQuantityInvalid;
+
         if (frequencyQuantity is not null && frequencyQuantity <= 0)
             return DomainErrors.FrequencyQuantityInvalid;
 

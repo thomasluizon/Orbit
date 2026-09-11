@@ -443,6 +443,19 @@ public class Habit : Entity, ITimestamped, ISoftDeletable
 
     public Result Update(HabitUpdateParams p)
     {
+        var validation = ValidateUpdate(p);
+        if (validation.IsFailure)
+            return validation;
+
+        ApplyRequiredUpdates(p);
+        ApplyOptionalUpdates(p);
+
+        UpdatedAtUtc = DateTime.UtcNow;
+        return Result.Success();
+    }
+
+    public Result ValidateUpdate(HabitUpdateParams p)
+    {
         if (string.IsNullOrWhiteSpace(p.Title))
             return Result.Failure(DomainErrors.TitleRequired);
 
@@ -450,10 +463,6 @@ public class Habit : Entity, ITimestamped, ISoftDeletable
         if (validationError is not null)
             return Result.Failure(validationError);
 
-        ApplyRequiredUpdates(p);
-        ApplyOptionalUpdates(p);
-
-        UpdatedAtUtc = DateTime.UtcNow;
         return Result.Success();
     }
 

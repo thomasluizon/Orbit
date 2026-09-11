@@ -103,7 +103,24 @@ public sealed class BulkUpdateHabitsTool(IMediator mediator) : IAiTool
         var appliedCount = 0;
         foreach (var chunk in items.Chunk(AppConstants.MaxBulkOperationSize))
         {
-            var result = await executeChunk(chunk, cancellationToken);
+            Result<TResult> result;
+            try
+            {
+                result = await executeChunk(chunk, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                return appliedCount == 0
+                    ? new ToolResult(false, Error: "Bulk habit operation failed before any changes were applied.")
+                    : BuildResult(
+                        new BulkHabitMutationResult(appliedCount, items.Count, items.Count - appliedCount, true),
+                        verb);
+            }
+
             if (result.IsFailure)
             {
                 return appliedCount == 0

@@ -415,7 +415,7 @@ public class HabitTools(IMediator mediator, IUserDateService userDateService, Mc
     [McpServerTool(Name = "bulk_update_habits"), Description("Update the full server-side set of habits matching a JSON filter in one operation.")]
     public async Task<string> BulkUpdateHabits(
         ClaimsPrincipal user,
-        [Description("JSON filter with all, habit_ids, tag, search, include_completed, is_general, is_bad_habit, or frequency")] string filterJson,
+        [Description("JSON filter with all, habit_ids, tag, search, is_completed, is_general, is_bad_habit, or frequency")] string filterJson,
         [Description("JSON object containing the habit fields to update")] string updatesJson,
         [Description("Confirmation token returned by confirm_agent_operation_v2")] string? confirmationToken = null,
         CancellationToken cancellationToken = default)
@@ -434,7 +434,7 @@ public class HabitTools(IMediator mediator, IUserDateService userDateService, Mc
     [McpServerTool(Name = "bulk_reschedule_habits"), Description("Reschedule the full server-side set of habits matching a JSON filter in one operation.")]
     public async Task<string> BulkRescheduleHabits(
         ClaimsPrincipal user,
-        [Description("JSON filter with all, habit_ids, tag, search, include_completed, is_general, is_bad_habit, or frequency")] string filterJson,
+        [Description("JSON filter with all, habit_ids, tag, search, is_completed, is_general, is_bad_habit, or frequency")] string filterJson,
         [Description("New due date in YYYY-MM-DD format")] string dueDate,
         [Description("Confirmation token returned by confirm_agent_operation_v2")] string? confirmationToken = null,
         CancellationToken cancellationToken = default)

@@ -14,11 +14,12 @@ public sealed record BulkHabitFilter(
     bool? IsGeneral = null,
     bool? IsBadHabit = null,
     FrequencyUnit? Frequency = null,
-    bool OneTime = false)
+    bool OneTime = false,
+    bool? IsCompleted = null)
 {
     public bool HasSelector =>
         All || HabitIds.Count > 0 || !string.IsNullOrWhiteSpace(Tag) || !string.IsNullOrWhiteSpace(Search)
-        || IsGeneral.HasValue || IsBadHabit.HasValue || Frequency.HasValue || OneTime;
+        || IsGeneral.HasValue || IsBadHabit.HasValue || Frequency.HasValue || OneTime || IsCompleted.HasValue;
 }
 
 internal static class BulkHabitSelection
@@ -29,8 +30,11 @@ internal static class BulkHabitSelection
         BulkHabitFilter filter,
         CancellationToken cancellationToken)
     {
-        var habits = await habitRepository.FindTrackedAsync(
-            habit => habit.UserId == userId && (filter.IncludeCompleted || !habit.IsCompleted),
+        var habits = await habitRepository.FindAsync(
+            habit => habit.UserId == userId
+                && (filter.IsCompleted.HasValue
+                    ? habit.IsCompleted == filter.IsCompleted.Value
+                    : filter.IncludeCompleted || !habit.IsCompleted),
             query => query.Include(habit => habit.Tags),
             cancellationToken);
 

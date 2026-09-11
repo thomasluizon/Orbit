@@ -115,6 +115,19 @@ public class BulkLogHabitsToolTests
     }
 
     [Fact]
+    public async Task ConflictingSelectors_ReturnsErrorBeforeLoadingTargets()
+    {
+        var habitId = Guid.NewGuid();
+
+        var result = await Execute($$$"""{"habit_ids":["{{{habitId}}}"],"filter":{"all":true}}""");
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain("cannot combine");
+        await _habitRepo.DidNotReceiveWithAnyArgs().FindAsync(default!, default!, default);
+        await _mediator.DidNotReceiveWithAnyArgs().Send(default(BulkLogHabitsCommand)!, default);
+    }
+
+    [Fact]
     public async Task IgnoresUnknownNoteArgument_AndLogsSuccessfully()
     {
         var h1 = CreateHabit("Water");
@@ -186,6 +199,35 @@ public class BulkLogHabitsToolTests
         commandCount.Should().Be(2);
     }
 
+    [Fact]
+    public async Task LaterChunkException_ReportsExactCommittedCountsAsPartial()
+    {
+        var habits = Enumerable.Range(1, 205).Select(index => CreateHabit($"Habit {index}")).ToArray();
+        var commandCount = 0;
+        SetupHabitsFound(habits);
+        _mediator.Send(Arg.Any<BulkLogHabitsCommand>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                commandCount++;
+                if (commandCount == 2)
+                    return Task.FromException<Result<BulkLogResult>>(new InvalidOperationException("write failed"));
+                var command = call.Arg<BulkLogHabitsCommand>();
+                return Task.FromResult(Result.Success(new BulkLogResult(command.Items.Select((item, index) =>
+                    new BulkLogItemResult(index, BulkItemStatus.Success, item.HabitId, Guid.NewGuid())).ToList())));
+            });
+
+        var result = await Execute("""{"filter":{"all":true}}""");
+
+        result.Success.Should().BeTrue();
+        var payload = JsonSerializer.SerializeToElement(result.Payload);
+        payload.GetProperty("applied_count").GetInt32().Should().Be(100);
+        payload.GetProperty("total_matched").GetInt32().Should().Be(205);
+        payload.GetProperty("skipped_count").GetInt32().Should().Be(105);
+        payload.GetProperty("partial").GetBoolean().Should().BeTrue();
+        result.EntityName.Should().Contain("Partial result");
+        commandCount.Should().Be(2);
+    }
+
     private static JsonElement ArgsFor(Guid habitId) =>
         JsonDocument.Parse($$"""{"habit_ids":["{{habitId}}"]}""").RootElement;
 
@@ -196,7 +238,7 @@ public class BulkLogHabitsToolTests
 
     private void SetupHabitsFound(params Habit[] habits)
     {
-        _habitRepo.FindTrackedAsync(
+        _habitRepo.FindAsync(
             Arg.Any<Expression<Func<Habit, bool>>>(),
             Arg.Any<Func<IQueryable<Habit>, IQueryable<Habit>>>(),
             Arg.Any<CancellationToken>()

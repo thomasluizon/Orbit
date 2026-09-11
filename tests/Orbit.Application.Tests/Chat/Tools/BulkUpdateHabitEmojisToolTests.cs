@@ -25,9 +25,9 @@ public class BulkUpdateHabitEmojisToolTests
     public BulkUpdateHabitEmojisToolTests()
     {
         _unitOfWork.ExecuteInTransactionAsync(
-                Arg.Any<Func<CancellationToken, Task>>(),
+                Arg.Any<Func<CancellationToken, Task<int>>>(),
                 Arg.Any<CancellationToken>())
-            .Returns(call => call.ArgAt<Func<CancellationToken, Task>>(0)(call.ArgAt<CancellationToken>(1)));
+            .Returns(call => call.ArgAt<Func<CancellationToken, Task<int>>>(0)(call.ArgAt<CancellationToken>(1)));
         _inferenceService.InferAsync(
                 Arg.Any<Guid>(),
                 Arg.Any<IReadOnlyList<HabitEmojiInferenceInput>>(),
@@ -139,7 +139,7 @@ public class BulkUpdateHabitEmojisToolTests
         result.Success.Should().BeFalse();
         result.Error.Should().Contain("habit_ids");
         gym.Emoji.Should().BeNull();
-        await _habitRepo.DidNotReceiveWithAnyArgs().FindTrackedAsync(default!, default!, default);
+        await _habitRepo.DidNotReceiveWithAnyArgs().FindAsync(default!, default!, default);
     }
 
     [Fact]
@@ -153,7 +153,7 @@ public class BulkUpdateHabitEmojisToolTests
         result.Success.Should().BeFalse();
         result.Error.Should().Contain("habit_ids");
         gym.Emoji.Should().BeNull();
-        await _habitRepo.DidNotReceiveWithAnyArgs().FindTrackedAsync(default!, default!, default);
+        await _habitRepo.DidNotReceiveWithAnyArgs().FindAsync(default!, default!, default);
     }
 
     [Fact]
@@ -231,6 +231,60 @@ public class BulkUpdateHabitEmojisToolTests
         await _unitOfWork.DidNotReceive().SaveChangesAsync(Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task InferFromTitle_WhenTransactionRetries_ReloadsHabitsAndCountsCommittedAttemptOnly()
+    {
+        var selected = CreateHabit("Selected");
+        var failedAttempt = CreateHabit("Failed attempt");
+        var committedAttempt = CreateHabit("Committed attempt");
+        var idProperty = typeof(Habit).GetProperty(nameof(Habit.Id))!;
+        idProperty.SetValue(failedAttempt, selected.Id);
+        idProperty.SetValue(committedAttempt, selected.Id);
+        _habitRepo.FindAsync(
+                Arg.Any<Expression<Func<Habit, bool>>>(),
+                Arg.Any<Func<IQueryable<Habit>, IQueryable<Habit>>>(),
+                Arg.Any<CancellationToken>())
+            .Returns([selected]);
+        var loadCount = 0;
+        _habitRepo.FindTrackedAsync(
+                Arg.Any<Expression<Func<Habit, bool>>>(),
+                Arg.Any<Func<IQueryable<Habit>, IQueryable<Habit>>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(_ => ++loadCount switch
+            {
+                1 => [failedAttempt],
+                _ => [committedAttempt]
+            });
+        var attemptCount = 0;
+        _unitOfWork.ExecuteInTransactionAsync(
+                Arg.Any<Func<CancellationToken, Task<int>>>(),
+                Arg.Any<CancellationToken>())
+            .Returns(async call =>
+            {
+                var operation = call.ArgAt<Func<CancellationToken, Task<int>>>(0);
+                var token = call.ArgAt<CancellationToken>(1);
+                try
+                {
+                    attemptCount++;
+                    return await operation(token);
+                }
+                catch (InvalidOperationException) when (attemptCount == 1)
+                {
+                    return await operation(token);
+                }
+            });
+        _unitOfWork.SaveChangesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<int>(new InvalidOperationException("transient")), Task.FromResult(1));
+
+        var result = await Execute("""{"infer_from_title":true}""");
+
+        result.Success.Should().BeTrue();
+        var payload = JsonSerializer.SerializeToElement(result.Payload);
+        payload.GetProperty("applied_count").GetInt32().Should().Be(1);
+        committedAttempt.Emoji.Should().Be("🏃");
+        loadCount.Should().Be(2);
+    }
+
     private static Habit CreateHabit(string title, string? emoji = null)
     {
         return Habit.Create(new HabitCreateParams(UserId, title, FrequencyUnit.Day, 1, DueDate: Today, Emoji: emoji)).Value;
@@ -238,6 +292,15 @@ public class BulkUpdateHabitEmojisToolTests
 
     private void SetupHabits(params Habit[] habits)
     {
+        _habitRepo.FindAsync(
+            Arg.Any<Expression<Func<Habit, bool>>>(),
+            Arg.Any<Func<IQueryable<Habit>, IQueryable<Habit>>>(),
+            Arg.Any<CancellationToken>()
+        ).Returns(callInfo =>
+        {
+            var predicate = callInfo.ArgAt<Expression<Func<Habit, bool>>>(0).Compile();
+            return habits.Where(predicate).ToList();
+        });
         _habitRepo.FindTrackedAsync(
             Arg.Any<Expression<Func<Habit, bool>>>(),
             Arg.Any<Func<IQueryable<Habit>, IQueryable<Habit>>>(),

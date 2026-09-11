@@ -1,6 +1,7 @@
 using MediatR;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
+using Orbit.Application.Chat.Tools.Implementations;
 using Orbit.Application.Common;
 using Orbit.Domain.Common;
 using Orbit.Domain.Entities;
@@ -65,6 +66,7 @@ public sealed record BulkHabitMutationResult(
 public sealed partial class BulkUpdateHabitsCommandHandler(
     IGenericRepository<Habit> habitRepository,
     IUserDateService userDateService,
+    IPayGateService payGate,
     IUnitOfWork unitOfWork,
     IMemoryCache cache,
     ILogger<BulkUpdateHabitsCommandHandler> logger) : IRequestHandler<BulkUpdateHabitsCommand, Result<BulkHabitMutationResult>>
@@ -75,34 +77,32 @@ public sealed partial class BulkUpdateHabitsCommandHandler(
         BulkUpdateHabitsCommand request,
         CancellationToken cancellationToken)
     {
-        var habits = await BulkHabitSelection.LoadAsync(
+        var selectedHabits = await BulkHabitSelection.LoadAsync(
             habitRepository,
             request.UserId,
             request.Filter,
             cancellationToken);
-        var totalMatched = habits.Count;
+        var selectedIds = selectedHabits.Select(habit => habit.Id).ToList();
+        var totalMatched = selectedIds.Count;
         var appliedCount = 0;
         var stopped = false;
         var today = await userDateService.GetUserTodayAsync(request.UserId, cancellationToken);
 
-        foreach (var chunk in habits.Chunk(ChunkSize))
+        foreach (var chunk in selectedIds.Chunk(ChunkSize))
         {
-            var chunkApplied = 0;
+            Result<int> chunkResult;
             try
             {
-                await unitOfWork.ExecuteInTransactionAsync(async transactionToken =>
-                {
-                    foreach (var habit in chunk)
-                    {
-                        var update = ResolveUpdate(habit, request.Changes, today);
-                        if (habit.Update(update).IsSuccess)
-                            chunkApplied++;
-                    }
-
-                    if (chunkApplied > 0)
-                        await unitOfWork.SaveChangesAsync(transactionToken);
-                }, cancellationToken);
-                appliedCount += chunkApplied;
+                chunkResult = await HabitCeilingLock.ExecuteAsync(
+                    unitOfWork,
+                    request.UserId,
+                    transactionToken => ApplyChunkAsync(
+                        request.UserId,
+                        chunk,
+                        request.Changes,
+                        today,
+                        transactionToken),
+                    cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -111,6 +111,16 @@ public sealed partial class BulkUpdateHabitsCommandHandler(
                 stopped = true;
                 break;
             }
+
+            if (chunkResult.IsFailure)
+            {
+                if (appliedCount == 0)
+                    return chunkResult.PropagateError<BulkHabitMutationResult>();
+                stopped = true;
+                break;
+            }
+
+            appliedCount += chunkResult.Value;
         }
 
         if (appliedCount > 0)
@@ -127,8 +137,56 @@ public sealed partial class BulkUpdateHabitsCommandHandler(
     [LoggerMessage(EventId = 1, Level = LogLevel.Warning, Message = "Bulk habit update chunk failed after {AppliedCount} of {TotalMatched} matches")]
     private static partial void LogChunkFailed(ILogger logger, int appliedCount, int totalMatched, Exception ex);
 
+    private async Task<Result<int>> ApplyChunkAsync(
+        Guid userId,
+        IReadOnlyCollection<Guid> habitIds,
+        BulkHabitChanges changes,
+        DateOnly today,
+        CancellationToken cancellationToken)
+    {
+        var habits = await habitRepository.FindTrackedAsync(
+            habit => habit.UserId == userId && habitIds.Contains(habit.Id),
+            query => query,
+            cancellationToken);
+        var updates = habits
+            .Select(habit => (Habit: habit, Update: ResolveUpdate(habit, changes, today)))
+            .ToList();
+
+        foreach (var item in updates)
+        {
+            var validation = item.Habit.ValidateUpdate(item.Update);
+            if (validation.IsFailure)
+                return validation.PropagateError<int>();
+        }
+
+        var liveRootEntries = updates.Count(item => HabitLiveRootEntry.FromUpdate(item.Habit, item.Update));
+        if (liveRootEntries > 0)
+        {
+            var allowance = await payGate.CanCreateHabits(userId, liveRootEntries, cancellationToken);
+            if (allowance.IsFailure)
+                return allowance.PropagateError<int>();
+        }
+
+        foreach (var item in updates)
+            item.Habit.Update(item.Update);
+
+        if (updates.Count > 0)
+            await unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return Result.Success(updates.Count);
+    }
+
     private static HabitUpdateParams ResolveUpdate(Habit habit, BulkHabitChanges changes, DateOnly today)
     {
+        var dueTime = changes.HasDueTime ? changes.DueTime : habit.DueTime;
+        var (reminderTimes, scheduledReminders) = ReminderStoreNormalizer.NormalizeForUpdate(
+            dueTime,
+            habit.DueTime,
+            changes.HasReminderTimes ? changes.ReminderTimes?.ToList() ?? [] : null,
+            changes.HasScheduledReminders ? changes.ScheduledReminders?.ToList() ?? [] : null,
+            habit.ReminderTimes,
+            habit.ScheduledReminders);
+
         return new HabitUpdateParams(
             changes.HasTitle ? changes.Title ?? habit.Title : habit.Title,
             changes.HasDescription ? changes.Description : habit.Description,
@@ -137,15 +195,15 @@ public sealed partial class BulkUpdateHabitsCommandHandler(
             changes.HasDays ? changes.Days : habit.Days.ToList(),
             changes.HasIsBadHabit ? changes.IsBadHabit : habit.IsBadHabit,
             changes.HasDueDate ? changes.DueDate : habit.DueDate,
-            DueTime: changes.HasDueTime ? changes.DueTime : habit.DueTime,
+            DueTime: dueTime,
             DueEndTime: habit.DueEndTime,
             ReminderEnabled: changes.HasReminderEnabled ? changes.ReminderEnabled : null,
-            ReminderTimes: changes.HasReminderTimes ? changes.ReminderTimes : null,
+            ReminderTimes: reminderTimes,
             ChecklistItems: changes.HasChecklistItems ? changes.ChecklistItems : null,
             IsFlexible: changes.HasIsFlexible ? changes.IsFlexible : null,
             EndDate: changes.HasEndDate ? changes.EndDate : null,
             ClearEndDate: changes.HasEndDate && changes.EndDate is null,
-            ScheduledReminders: changes.HasScheduledReminders ? changes.ScheduledReminders : null,
+            ScheduledReminders: scheduledReminders,
             Emoji: changes.HasEmoji ? changes.Emoji : habit.Emoji,
             UserToday: today,
             IntervalWeeks: changes.HasIntervalWeeks ? changes.IntervalWeeks : habit.IntervalWeeks);

@@ -70,16 +70,19 @@ public sealed partial class BulkUpdateHabitEmojisTool(
         if (habits.Count == 0)
             return new ToolResult(false, Error: "No matching habits found to update.");
 
+        var inputs = habits
+            .Select(habit => new HabitEmojiInferenceInput(habit.Id, habit.Title, habit.Description))
+            .ToList();
         var appliedCount = 0;
         var stopped = false;
-        foreach (var chunk in habits.Chunk(InferenceChunkSize))
+        foreach (var chunk in inputs.Chunk(InferenceChunkSize))
         {
             IReadOnlyDictionary<Guid, string>? inferred = null;
             if (inferFromTitle)
             {
                 var inferenceResult = await inferenceService.InferAsync(
                     userId,
-                    chunk.Select(habit => new HabitEmojiInferenceInput(habit.Id, habit.Title, habit.Description)).ToList(),
+                    chunk,
                     ct);
                 if (inferenceResult.IsFailure)
                 {
@@ -90,12 +93,17 @@ public sealed partial class BulkUpdateHabitEmojisTool(
                 inferred = inferenceResult.Value;
             }
 
-            var chunkApplied = 0;
             try
             {
-                await unitOfWork.ExecuteInTransactionAsync(async transactionToken =>
+                var chunkIds = chunk.Select(input => input.HabitId).ToHashSet();
+                var chunkApplied = await unitOfWork.ExecuteInTransactionAsync(async transactionToken =>
                 {
-                    foreach (var habit in chunk)
+                    var trackedHabits = await habitRepository.FindTrackedAsync(
+                        habit => habit.UserId == userId && chunkIds.Contains(habit.Id),
+                        query => query,
+                        transactionToken);
+                    var attemptApplied = 0;
+                    foreach (var habit in trackedHabits)
                     {
                         string? emoji;
                         if (inferFromTitle)
@@ -109,11 +117,13 @@ public sealed partial class BulkUpdateHabitEmojisTool(
                         }
 
                         if (ApplyEmoji(habit, emoji).IsSuccess)
-                            chunkApplied++;
+                            attemptApplied++;
                     }
 
-                    if (chunkApplied > 0)
+                    if (attemptApplied > 0)
                         await unitOfWork.SaveChangesAsync(transactionToken);
+
+                    return attemptApplied;
                 }, ct);
                 appliedCount += chunkApplied;
             }

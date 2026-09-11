@@ -69,6 +69,19 @@ public class BulkDeleteHabitsToolTests
     }
 
     [Fact]
+    public async Task ConflictingSelectors_ReturnsErrorBeforeLoadingTargets()
+    {
+        var habitId = Guid.NewGuid();
+
+        var result = await Execute($$$"""{"habit_ids":["{{{habitId}}}"],"filter":{"all":true}}""");
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain("cannot combine");
+        await _habitRepository.DidNotReceiveWithAnyArgs().FindAsync(default!, default!, default);
+        await _mediator.DidNotReceiveWithAnyArgs().Send(default(BulkDeleteHabitsCommand)!, default);
+    }
+
+    [Fact]
     public async Task ValidIds_ReportsSuccessCount()
     {
         var firstHabit = CreateHabit("First");
@@ -128,12 +141,40 @@ public class BulkDeleteHabitsToolTests
         chunkSizes.Should().Equal(AppConstants.MaxBulkOperationSize, AppConstants.MaxBulkOperationSize, 5);
     }
 
+    [Fact]
+    public async Task CompletedFilter_DeletesOnlyCompletedHabits()
+    {
+        var active = CreateHabit("Active");
+        var completed = Habit.Create(new HabitCreateParams(
+            UserId,
+            "Completed",
+            null,
+            null,
+            new DateOnly(2026, 9, 11))).Value;
+        completed.Log(new DateOnly(2026, 9, 11));
+        SetupHabits(active, completed);
+        _mediator.Send(Arg.Any<BulkDeleteHabitsCommand>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var command = call.Arg<BulkDeleteHabitsCommand>();
+                return Result.Success(new BulkDeleteResult(command.HabitIds.Select((id, index) =>
+                    new BulkDeleteItemResult(index, BulkItemStatus.Success, id)).ToList()));
+            });
+
+        var result = await Execute("""{"filter":{"all":true,"is_completed":true}}""");
+
+        result.Success.Should().BeTrue();
+        await _mediator.Received(1).Send(
+            Arg.Is<BulkDeleteHabitsCommand>(command => command.HabitIds.SequenceEqual(new[] { completed.Id })),
+            Arg.Any<CancellationToken>());
+    }
+
     private async Task<ToolResult> Execute(string json) =>
         await _tool.ExecuteAsync(JsonDocument.Parse(json).RootElement, UserId, CancellationToken.None);
 
     private void SetupHabits(params Habit[] habits)
     {
-        _habitRepository.FindTrackedAsync(
+        _habitRepository.FindAsync(
                 Arg.Any<Expression<Func<Habit, bool>>>(),
                 Arg.Any<Func<IQueryable<Habit>, IQueryable<Habit>>>(),
                 Arg.Any<CancellationToken>())
