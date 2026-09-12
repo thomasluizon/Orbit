@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using MediatR;
 using Orbit.Application.Habits.Commands;
@@ -6,7 +7,7 @@ using Orbit.Domain.Interfaces;
 
 namespace Orbit.Application.Chat.Tools.Implementations;
 
-public class BulkLogHabitsTool(
+public sealed class BulkLogHabitsTool(
     IMediator mediator,
     IGenericRepository<Habit> habitRepository,
     IUserDateService userDateService) : IAiTool
@@ -14,43 +15,46 @@ public class BulkLogHabitsTool(
     public string Name => "bulk_log_habits";
 
     public string Description =>
-        "Log multiple habits as completed for today in a single operation. Use this only for habits the user EXPLICITLY mentioned completing - never include extra habits that share a tag, parent, routine, or theme but were not named.";
+        "Log multiple habits from the complete server-side set matching a filter in one operation. Use only for habits the user explicitly described completing. Reports applied, matched, skipped, and partial counts.";
 
-    public object GetParameterSchema() => HabitToolHelpers.BulkHabitActionSchema(
-        "Array of habit IDs to log as completed",
-        "Date to log for in YYYY-MM-DD format (defaults to today)");
+    public object GetParameterSchema() => BulkHabitToolArguments.ActionFilterSchema(
+        "Legacy array of habit IDs to log as completed.",
+        "Date to log for in YYYY-MM-DD format. Defaults to today.");
 
     public async Task<ToolResult> ExecuteAsync(JsonElement args, Guid userId, CancellationToken ct)
     {
-        var (habitIds, parseError) = HabitToolHelpers.ParseHabitIds(args);
-        if (parseError is not null)
-            return parseError;
+        var (filter, filterError) = BulkHabitToolArguments.ParseActionFilter(args);
+        if (filterError is not null)
+            return new ToolResult(false, Error: filterError);
+        var targetDateResult = await ResolveDateAsync(args, userId, ct);
+        if (targetDateResult.Error is not null)
+            return new ToolResult(false, Error: targetDateResult.Error);
 
-        var today = await userDateService.GetUserTodayAsync(userId, ct);
-        var targetDate = JsonArgumentParser.ParseDateOnly(args, "date") ?? today;
-        var habits = await habitRepository.FindAsync(
-            h => habitIds.Contains(h.Id) && h.UserId == userId,
-            ct);
+        var habits = await BulkHabitSelection.LoadAsync(habitRepository, userId, filter!, ct);
         if (habits.Count == 0)
-            return new ToolResult(false, Error: "No habits were logged. They may already be completed or not found.");
+            return new ToolResult(false, Error: "No matching habits found to log.");
 
-        var result = await mediator.Send(
-            new BulkLogHabitsCommand(userId, habitIds.Select(id => new BulkLogItem(id, targetDate)).ToList()),
+        return await BulkUpdateHabitsTool.ExecuteInChunksAsync(
+            habits.Select(habit => new BulkLogItem(habit.Id, targetDateResult.Date)).ToList(),
+            (items, cancellationToken) => mediator.Send(
+                new BulkLogHabitsCommand(userId, items),
+                cancellationToken),
+            result => result.Results.Count(item => item.Status == BulkItemStatus.Success && item.LogId.HasValue),
+            "Logged",
             ct);
-        if (result.IsFailure)
-            return ToolResult.FromFailure(result);
+    }
 
-        var loggedIds = result.Value.Results
-            .Where(item => item.Status == BulkItemStatus.Success && item.LogId.HasValue)
-            .Select(item => item.HabitId)
-            .ToHashSet();
-        var loggedTitles = habits
-            .Where(habit => loggedIds.Contains(habit.Id))
-            .Select(habit => habit.Title)
-            .ToList();
-
-        return loggedTitles.Count == 0
-            ? new ToolResult(false, Error: "No habits were logged. They may already be completed or not found.")
-            : new ToolResult(true, EntityName: string.Join(", ", loggedTitles));
+    private async Task<(DateOnly Date, string? Error)> ResolveDateAsync(
+        JsonElement args,
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var today = await userDateService.GetUserTodayAsync(userId, cancellationToken);
+        if (!args.TryGetProperty("date", out var dateElement) || dateElement.ValueKind == JsonValueKind.Null)
+            return (today, null);
+        if (dateElement.ValueKind != JsonValueKind.String
+            || !DateOnly.TryParseExact(dateElement.GetString(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+            return (default, "date must use YYYY-MM-DD format.");
+        return (date, null);
     }
 }

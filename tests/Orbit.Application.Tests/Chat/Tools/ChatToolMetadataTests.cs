@@ -2,6 +2,7 @@ using System.Text.Json;
 using MediatR;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Orbit.Application.Chat.Tools.Implementations;
 using Orbit.Application.Goals.Services;
@@ -24,9 +25,13 @@ public class ChatToolMetadataTests
         var goalProgressReadSyncer = Substitute.For<Orbit.Application.Goals.Services.IGoalProgressReadSyncer>();
 
         var assignTagsTool = new AssignTagsTool(Repo<Habit>(), Repo<Tag>(), unitOfWork);
-        var bulkUpdateHabitEmojisTool = new BulkUpdateHabitEmojisTool(Repo<Habit>());
+        var bulkUpdateHabitEmojisTool = new BulkUpdateHabitEmojisTool(
+            Repo<Habit>(), Substitute.For<IHabitEmojiInferenceService>(), unitOfWork,
+            NullLogger<BulkUpdateHabitEmojisTool>.Instance);
+        var bulkUpdateHabitsTool = new BulkUpdateHabitsTool(mediator);
+        var bulkRescheduleHabitsTool = new BulkRescheduleHabitsTool(mediator);
         var bulkLogHabitsTool = new BulkLogHabitsTool(Substitute.For<IMediator>(), Repo<Habit>(), userDateService);
-        var bulkSkipHabitsTool = new BulkSkipHabitsTool(Repo<Habit>(), Repo<HabitLog>(), userDateService);
+        var bulkSkipHabitsTool = new BulkSkipHabitsTool(Substitute.For<IMediator>(), Repo<Habit>(), userDateService);
         var createGoalTool = new CreateGoalTool(Repo<Goal>(), unitOfWork);
         var createHabitTool = new CreateHabitTool(Repo<Habit>(), Repo<Tag>(), Repo<Goal>(), userDateService, payGateService, unitOfWork);
         var createSubHabitTool = new CreateSubHabitTool(mediator);
@@ -66,6 +71,8 @@ public class ChatToolMetadataTests
         AssertTool(reorderGoalsTool, "reorder_goals", "position", "goal_id");
         AssertTool(getReferralCodeTool, "get_referral_code", "referral", "type");
         AssertTool(bulkUpdateHabitEmojisTool, "bulk_update_habit_emojis", "emojis", "infer_from_title");
+        AssertTool(bulkUpdateHabitsTool, "bulk_update_habits", "complete", "updates");
+        AssertTool(bulkRescheduleHabitsTool, "bulk_reschedule_habits", "reschedule", "due_date");
         AssertTool(bulkLogHabitsTool, "bulk_log_habits", "multiple", "habit_ids");
         AssertTool(bulkSkipHabitsTool, "bulk_skip_habits", "multiple", "habit_ids");
         AssertTool(createGoalTool, "create_goal", "goal", "goal_type");

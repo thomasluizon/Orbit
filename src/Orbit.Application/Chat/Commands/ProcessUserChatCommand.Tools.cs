@@ -165,6 +165,7 @@ public partial class ProcessUserChatCommandHandler
         var writeCalls = orderedCalls
             .Where(call => ai.ToolRegistry.GetTool(call.Name)?.IsReadOnly != true)
             .ToList();
+        var bulkRedirects = BulkToolRepeatGuard.FindRedirects(writeCalls);
 
         var readOnlyTasks = readOnlyCalls
             .Select(call => ExecuteReadOnlyToolCallOnIsolatedScopeAsync(call, request, cancellationToken))
@@ -177,11 +178,27 @@ public partial class ProcessUserChatCommandHandler
 
         foreach (var call in writeCalls)
         {
+            if (bulkRedirects.TryGetValue(call.Id, out var bulkTool))
+            {
+                outcomesByCallId[call.Id] = RepeatedSingleEntityToolOutcome(call, bulkTool);
+                continue;
+            }
             outcomesByCallId[call.Id] = await ExecuteSingleToolCallAsync(
                 call, request, execution.OperationExecutor, execution.PendingClarificationStore, cancellationToken);
         }
 
         return outcomesByCallId;
+    }
+
+    private static ToolCallOutcome RepeatedSingleEntityToolOutcome(AiToolCall call, string bulkTool)
+    {
+        var error = $"Repeated {call.Name} calls were blocked. Use one {bulkTool} call for the full matching set.";
+        return new ToolCallOutcome(
+            new AiToolCallResult(call.Name, call.Id, false, null, null, error),
+            new ActionResult(ToolNameToPascalCase(call.Name), ActionStatus.Failed, Error: error),
+            null,
+            null,
+            null);
     }
 
     private async Task<ToolCallOutcome> ExecuteReadOnlyToolCallOnIsolatedScopeAsync(

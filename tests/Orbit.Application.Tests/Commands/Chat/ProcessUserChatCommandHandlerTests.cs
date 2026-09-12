@@ -512,6 +512,23 @@ public class ProcessUserChatCommandHandlerTests
     }
 
     [Fact]
+    public async Task Handle_TruncatedAiResponse_AppendsExplicitPartialNotice()
+    {
+        SetupUserAndPayGate();
+        SetupAiResponse(new AiResponse { TextMessage = "First part", IsTruncated = true });
+        var handler = CreateHandler();
+
+        var result = await handler.Handle(
+            new ProcessUserChatCommand(UserId, "List everything"),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        result.Value.AiMessage.Should().Contain("First part");
+        result.Value.AiMessage.Should().Contain("cut off before completion");
+        result.Value.AiMessage.Should().Contain("partial");
+    }
+
+    [Fact]
     public async Task Handle_SuccessfulTurn_FiresOnboardingAstraUsedSignal()
     {
         SetupUserAndPayGate();
@@ -1786,6 +1803,50 @@ public class ProcessUserChatCommandHandlerTests
         result.Value.Actions.Should().HaveCount(2);
         result.Value.Actions.Select(a => a.Type).Should().Contain("CreateHabit");
         result.Value.Actions.Select(a => a.Type).Should().Contain("LogHabit");
+    }
+
+    [Fact]
+    public async Task Handle_RepeatedSingleHabitCallsAtThreshold_BlocksDispatchAndRequestsBulkTool()
+    {
+        SetupUserAndPayGate();
+        var updateTool = Substitute.For<IAiTool>();
+        updateTool.Name.Returns("update_habit");
+        updateTool.Description.Returns("Updates a habit");
+        updateTool.IsReadOnly.Returns(false);
+        updateTool.GetParameterSchema().Returns(new { type = "object" });
+        var handler = CreateHandler(updateTool);
+        var args = ParseArguments("""{"habit_id":"00000000-0000-0000-0000-000000000001"}""");
+        SetupAiResponse(new AiResponse
+        {
+            ToolCalls =
+            [
+                new AiToolCall("update_habit", "call_1", args),
+                new AiToolCall("update_habit", "call_2", args),
+                new AiToolCall("update_habit", "call_3", args)
+            ],
+            ConversationContext = TestConversationContext
+        });
+        IReadOnlyList<AiToolCallResult>? forwardedResults = null;
+        _aiIntentService.ContinueWithToolResultsAsync(
+                Arg.Any<AiConversationContext>(),
+                Arg.Any<IReadOnlyList<AiToolCallResult>>(),
+                Arg.Any<Func<AiStreamEvent, Task>?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                forwardedResults = call.ArgAt<IReadOnlyList<AiToolCallResult>>(1);
+                return Result.Success(new AiResponse { TextMessage = "Using the bulk path." });
+            });
+
+        var result = await handler.Handle(
+            new ProcessUserChatCommand(UserId, "Change all my habits"),
+            CancellationToken.None);
+
+        result.IsSuccess.Should().BeTrue();
+        forwardedResults.Should().HaveCount(3);
+        forwardedResults.Should().OnlyContain(item => !item.Success && item.Error!.Contains("bulk_update_habits"));
+        await _operationExecutor.DidNotReceiveWithAnyArgs().ExecuteAsync(default!, default);
+        await updateTool.DidNotReceiveWithAnyArgs().ExecuteAsync(default, default, default);
     }
 
     [Fact]

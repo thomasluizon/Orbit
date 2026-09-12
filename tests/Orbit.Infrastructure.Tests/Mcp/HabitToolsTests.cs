@@ -517,14 +517,14 @@ public class HabitToolsTests
         var bulkResult = new BulkDeleteResult([
             new BulkDeleteItemResult(0, BulkItemStatus.Success, id)
         ]);
-        StubExecutor(AgentOperationStatus.Succeeded, payload: bulkResult);
+        StubExecutor(AgentOperationStatus.Succeeded, targetName: "Deleted 1 of 1 matching habit(s). Skipped 0. Complete result.", payload: bulkResult);
 
         AgentExecuteOperationRequest request = null!;
         string result = string.Empty;
         request = await CapturedRequestAsync(async () => result = await _tools.BulkDeleteHabits(_user, id.ToString()));
 
         request.OperationId.Should().Be("bulk_delete_habits");
-        result.Should().Contain("1/1 deleted successfully");
+        result.Should().Contain("Deleted 1 of 1");
     }
 
     [Fact]
@@ -538,17 +538,53 @@ public class HabitToolsTests
     }
 
     [Fact]
+    public async Task BulkUpdateHabits_RoutesFilterAndUpdatesThroughExecutor()
+    {
+        StubExecutor(AgentOperationStatus.Succeeded, targetName: "Updated 250 of 250 matching habit(s). Skipped 0. Complete result.");
+
+        AgentExecuteOperationRequest request = null!;
+        string result = string.Empty;
+        request = await CapturedRequestAsync(async () => result = await _tools.BulkUpdateHabits(
+            _user,
+            """{"all":true}""",
+            """{"description":"Changed"}"""));
+
+        request.OperationId.Should().Be("bulk_update_habits");
+        request.Arguments.GetProperty("filter").GetProperty("all").GetBoolean().Should().BeTrue();
+        request.Arguments.GetProperty("updates").GetProperty("description").GetString().Should().Be("Changed");
+        result.Should().Contain("250 of 250");
+    }
+
+    [Fact]
+    public async Task BulkRescheduleHabits_RoutesFilterAndDateThroughExecutor()
+    {
+        StubExecutor(AgentOperationStatus.Succeeded, targetName: "Rescheduled 250 of 250 matching habit(s). Skipped 0. Complete result.");
+
+        AgentExecuteOperationRequest request = null!;
+        string result = string.Empty;
+        request = await CapturedRequestAsync(async () => result = await _tools.BulkRescheduleHabits(
+            _user,
+            """{"all":true}""",
+            "2026-09-12"));
+
+        request.OperationId.Should().Be("bulk_reschedule_habits");
+        request.Arguments.GetProperty("filter").GetProperty("all").GetBoolean().Should().BeTrue();
+        request.Arguments.GetProperty("due_date").GetString().Should().Be("2026-09-12");
+        result.Should().Contain("250 of 250");
+    }
+
+    [Fact]
     public async Task BulkLogHabits_Success_RoutesThroughExecutor()
     {
         var id = Guid.NewGuid();
-        StubExecutor(AgentOperationStatus.Succeeded, targetName: "Read");
+        StubExecutor(AgentOperationStatus.Succeeded, targetName: "Logged 1 of 1 matching habit(s). Skipped 0. Complete result.");
 
         AgentExecuteOperationRequest request = null!;
         string result = string.Empty;
         request = await CapturedRequestAsync(async () => result = await _tools.BulkLogHabits(_user, id.ToString()));
 
         request.OperationId.Should().Be("bulk_log_habits");
-        result.Should().Contain("Bulk log: 1 habit(s) processed");
+        result.Should().Contain("Logged 1 of 1");
     }
 
     [Fact]
@@ -565,14 +601,14 @@ public class HabitToolsTests
     public async Task BulkSkipHabits_Success_RoutesThroughExecutor()
     {
         var id = Guid.NewGuid();
-        StubExecutor(AgentOperationStatus.Succeeded, targetName: "Read");
+        StubExecutor(AgentOperationStatus.Succeeded, targetName: "Skipped 1 of 1 matching habit(s). Skipped 0. Complete result.");
 
         AgentExecuteOperationRequest request = null!;
         string result = string.Empty;
         request = await CapturedRequestAsync(async () => result = await _tools.BulkSkipHabits(_user, id.ToString()));
 
         request.OperationId.Should().Be("bulk_skip_habits");
-        result.Should().Contain("Bulk skip: 1 habit(s) processed");
+        result.Should().Contain("Skipped 1 of 1");
     }
 
     [Fact]
@@ -694,6 +730,25 @@ public class HabitToolsTests
         var result = await _tools.GetAllHabitLogs(_user, "2026-04-01", "2026-04-07");
 
         result.Should().Contain("1 habits");
+        result.Should().Contain("partial: false");
+    }
+
+    [Fact]
+    public async Task GetAllHabitLogs_WhenPerHabitOutputIsCapped_ReportsTruncation()
+    {
+        var habitId = Guid.NewGuid();
+        var logs = Enumerable.Range(1, 12)
+            .Select(day => new HabitLogResponse(Guid.NewGuid(), new DateOnly(2026, 4, day), 1, DateTime.UtcNow))
+            .ToList();
+        _mediator.Send(Arg.Any<GetAllHabitLogsQuery>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(new Dictionary<Guid, List<HabitLogResponse>> { [habitId] = logs }));
+
+        var result = await _tools.GetAllHabitLogs(_user, "2026-04-01", "2026-04-12");
+
+        result.Should().Contain("total_logs: 12");
+        result.Should().Contain("returned_logs: 10");
+        result.Should().Contain("partial: true");
+        result.Should().Contain("total 12, returned 10");
     }
 
     [Fact]

@@ -47,6 +47,7 @@ public record AiResponse
     public IReadOnlyList<AiToolCall>? ToolCalls { get; init; }
     public string? TextMessage { get; init; }
     public int ReportedTokenCount { get; init; }
+    public bool IsTruncated { get; init; }
     public bool HasToolCalls => ToolCalls is { Count: > 0 };
     public AiConversationContext? ConversationContext { get; init; }
 }

@@ -174,6 +174,19 @@ public class GlobalRulesSectionTests
         result.Should().Contain("your list must match them");
         result.Should().Contain("Conciseness applies to prose, never to lists");
     }
+
+    [Fact]
+    public void Build_RequiresBulkCallsAndHonestCompletionClaims()
+    {
+        var ctx = new PromptContext(new List<Habit>(), new List<UserFact>(), false, null, null, null, null);
+        var result = new GlobalRulesSection().Build(ctx);
+
+        result.Should().Contain("bulk_update_habits");
+        result.Should().Contain("bulk_reschedule_habits");
+        result.Should().Contain("partial=false");
+        result.Should().Contain("applied_count equals total_matched");
+        result.Should().Contain("Never loop update_habit");
+    }
 }
 
 public class StructuringStrategySectionTests

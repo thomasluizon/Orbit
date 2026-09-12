@@ -1890,4 +1890,54 @@ public class HabitTests
         result.Value.DueDate.Should().Be(providedDueDate);
         result.Value.OriginalDayOfMonth.Should().Be(31);
     }
+
+    [Fact]
+    public void Create_RecurringUnitWithoutQuantity_ReturnsFailure()
+    {
+        var result = Habit.Create(new HabitCreateParams(
+            ValidUserId,
+            "Invalid recurrence",
+            FrequencyUnit.Day,
+            null,
+            Today));
+
+        result.IsFailure.Should().BeTrue();
+        result.Error.Should().Contain("Frequency quantity must be greater than 0");
+    }
+
+    [Fact]
+    public void Update_RecurringHabitWithNullQuantity_ReturnsFailureWithoutMutation()
+    {
+        var habit = CreateValidHabit();
+        var result = habit.Update(new HabitUpdateParams(
+            habit.Title,
+            habit.Description,
+            FrequencyUnit.Day,
+            null,
+            habit.Days.ToList(),
+            habit.IsBadHabit,
+            habit.DueDate));
+
+        result.IsFailure.Should().BeTrue();
+        habit.FrequencyUnit.Should().Be(FrequencyUnit.Day);
+        habit.FrequencyQuantity.Should().Be(1);
+    }
+
+    [Fact]
+    public void Update_OneTimeHabitWithRecurringUnitAndNoQuantity_ReturnsFailureWithoutMutation()
+    {
+        var habit = CreateOneTimeHabit(Today);
+        var result = habit.Update(new HabitUpdateParams(
+            habit.Title,
+            habit.Description,
+            FrequencyUnit.Day,
+            null,
+            habit.Days.ToList(),
+            habit.IsBadHabit,
+            habit.DueDate));
+
+        result.IsFailure.Should().BeTrue();
+        habit.FrequencyUnit.Should().BeNull();
+        habit.FrequencyQuantity.Should().BeNull();
+    }
 }

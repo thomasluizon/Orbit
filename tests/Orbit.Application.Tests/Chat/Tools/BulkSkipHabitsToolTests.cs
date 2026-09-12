@@ -1,9 +1,13 @@
 using System.Linq.Expressions;
 using System.Text.Json;
 using FluentAssertions;
+using MediatR;
 using NSubstitute;
 using Orbit.Application.Chat.Tools;
 using Orbit.Application.Chat.Tools.Implementations;
+using Orbit.Application.Common;
+using Orbit.Application.Habits.Commands;
+using Orbit.Domain.Common;
 using Orbit.Domain.Entities;
 using Orbit.Domain.Enums;
 using Orbit.Domain.Interfaces;
@@ -13,7 +17,7 @@ namespace Orbit.Application.Tests.Chat.Tools;
 public class BulkSkipHabitsToolTests
 {
     private readonly IGenericRepository<Habit> _habitRepo = Substitute.For<IGenericRepository<Habit>>();
-    private readonly IGenericRepository<HabitLog> _habitLogRepo = Substitute.For<IGenericRepository<HabitLog>>();
+    private readonly IMediator _mediator = Substitute.For<IMediator>();
     private readonly IUserDateService _userDateService = Substitute.For<IUserDateService>();
     private readonly BulkSkipHabitsTool _tool;
 
@@ -22,8 +26,15 @@ public class BulkSkipHabitsToolTests
 
     public BulkSkipHabitsToolTests()
     {
-        _tool = new BulkSkipHabitsTool(_habitRepo, _habitLogRepo, _userDateService);
+        _tool = new BulkSkipHabitsTool(_mediator, _habitRepo, _userDateService);
         _userDateService.GetUserTodayAsync(UserId, Arg.Any<CancellationToken>()).Returns(Today);
+        _mediator.Send(Arg.Any<BulkSkipHabitsCommand>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var command = call.Arg<BulkSkipHabitsCommand>();
+                return Result.Success(new BulkSkipResult(command.Items.Select((item, index) =>
+                    new BulkSkipItemResult(index, BulkItemStatus.Success, item.HabitId)).ToList()));
+            });
     }
 
     [Fact]
@@ -36,8 +47,7 @@ public class BulkSkipHabitsToolTests
         var result = await Execute($$$"""{"habit_ids": ["{{{h1.Id}}}", "{{{h2.Id}}}"]}""");
 
         result.Success.Should().BeTrue();
-        result.EntityName.Should().Contain("Water");
-        result.EntityName.Should().Contain("Exercise");
+        result.EntityName.Should().Contain("Skipped 2 of 2");
     }
 
     [Fact]
@@ -50,7 +60,7 @@ public class BulkSkipHabitsToolTests
         var result = await Execute($$$"""{"habit_ids": ["{{{h1.Id}}}", "{{{missingId}}}"]}""");
 
         result.Success.Should().BeTrue();
-        result.EntityName.Should().Contain("Water");
+        result.EntityName.Should().Contain("Skipped 1 of 1");
     }
 
     [Fact]
@@ -58,7 +68,7 @@ public class BulkSkipHabitsToolTests
     {
         var id1 = Guid.NewGuid();
         var id2 = Guid.NewGuid();
-        _habitRepo.FindTrackedAsync(
+        _habitRepo.FindAsync(
             Arg.Any<Expression<Func<Habit, bool>>>(),
             Arg.Any<Func<IQueryable<Habit>, IQueryable<Habit>>?>(),
             Arg.Any<CancellationToken>()
@@ -67,21 +77,26 @@ public class BulkSkipHabitsToolTests
         var result = await Execute($$$"""{"habit_ids": ["{{{id1}}}", "{{{id2}}}"]}""");
 
         result.Success.Should().BeFalse();
-        result.Error.Should().Contain("No habits were skipped");
+        result.Error.Should().Contain("No matching habits");
     }
 
     [Fact]
     public async Task CompletedHabits_SkipsCompleted()
     {
         var completed = Habit.Create(new HabitCreateParams(UserId, "Task", null, null, DueDate: Today)).Value;
-        completed.Log(Today);        var active = CreateHabit("Water", FrequencyUnit.Day, 1, Today);
+        completed.Log(Today);
+        var active = CreateHabit("Water", FrequencyUnit.Day, 1, Today);
         SetupHabitLookup(completed, active);
+        _mediator.Send(Arg.Any<BulkSkipHabitsCommand>(), Arg.Any<CancellationToken>())
+            .Returns(Result.Success(new BulkSkipResult([
+                new(0, BulkItemStatus.Failed, completed.Id),
+                new(1, BulkItemStatus.Success, active.Id)])));
 
         var result = await Execute($$$"""{"habit_ids": ["{{{completed.Id}}}", "{{{active.Id}}}"]}""");
 
         result.Success.Should().BeTrue();
-        result.EntityName.Should().Contain("Water");
-        result.EntityName.Should().NotContain("Task");
+        result.EntityName.Should().Contain("Skipped 1 of 2");
+        result.EntityName.Should().Contain("Partial result");
     }
 
     [Fact]
@@ -90,7 +105,7 @@ public class BulkSkipHabitsToolTests
         var result = await Execute("""{"habit_ids": []}""");
 
         result.Success.Should().BeFalse();
-        result.Error.Should().Contain("No valid habit IDs");
+        result.Error.Should().Contain("habit_ids");
     }
 
     [Fact]
@@ -99,11 +114,24 @@ public class BulkSkipHabitsToolTests
         var result = await Execute("{}");
 
         result.Success.Should().BeFalse();
-        result.Error.Should().Contain("habit_ids is required");
+        result.Error.Should().Contain("filter or habit_ids");
     }
 
     [Fact]
-    public async Task OneTimeTask_PostponesToTomorrow()
+    public async Task ConflictingSelectors_ReturnsErrorBeforeLoadingTargets()
+    {
+        var habitId = Guid.NewGuid();
+
+        var result = await Execute($$$"""{"habit_ids":["{{{habitId}}}"],"filter":{"all":true}}""");
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain("cannot combine");
+        await _habitRepo.DidNotReceiveWithAnyArgs().FindAsync(default!, default!, default);
+        await _mediator.DidNotReceiveWithAnyArgs().Send(default(BulkSkipHabitsCommand)!, default);
+    }
+
+    [Fact]
+    public async Task OneTimeTask_DefaultsCommandDateToToday()
     {
         var task = Habit.Create(new HabitCreateParams(UserId, "Buy milk", null, null, DueDate: Today)).Value;
         SetupHabitLookup(task);
@@ -111,7 +139,9 @@ public class BulkSkipHabitsToolTests
         var result = await Execute($$$"""{"habit_ids": ["{{{task.Id}}}"]}""");
 
         result.Success.Should().BeTrue();
-        task.DueDate.Should().Be(Today.AddDays(1));
+        await _mediator.Received(1).Send(
+            Arg.Is<BulkSkipHabitsCommand>(command => command.Items.Single().Date == Today),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -125,7 +155,30 @@ public class BulkSkipHabitsToolTests
         var result = await Execute($$$"""{"habit_ids": ["{{{otherUserHabit.Id}}}"]}""");
 
         result.Success.Should().BeFalse();
-        result.Error.Should().Contain("No habits were skipped");
+        result.Error.Should().Contain("No matching habits");
+    }
+
+    [Fact]
+    public async Task AllFilter_SkipsEveryMatchAcrossBoundedCommands()
+    {
+        var habits = Enumerable.Range(1, 205)
+            .Select(index => CreateHabit($"Habit {index}", FrequencyUnit.Day, 1, Today))
+            .ToArray();
+        var chunkSizes = new List<int>();
+        SetupHabitLookup(habits);
+        _mediator.Send(Arg.Any<BulkSkipHabitsCommand>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var command = call.Arg<BulkSkipHabitsCommand>();
+                chunkSizes.Add(command.Items.Count);
+                return Result.Success(new BulkSkipResult(command.Items.Select((item, index) =>
+                    new BulkSkipItemResult(index, BulkItemStatus.Success, item.HabitId)).ToList()));
+            });
+
+        var result = await Execute("""{"filter":{"all":true}}""");
+
+        result.EntityName.Should().Contain("Skipped 205 of 205");
+        chunkSizes.Should().Equal(AppConstants.MaxBulkOperationSize, AppConstants.MaxBulkOperationSize, 5);
     }
 
     private static Habit CreateHabit(string title, FrequencyUnit? freq, int? qty, DateOnly dueDate)
@@ -135,7 +188,7 @@ public class BulkSkipHabitsToolTests
 
     private void SetupHabitLookup(params Habit[] habits)
     {
-        _habitRepo.FindTrackedAsync(
+        _habitRepo.FindAsync(
             Arg.Any<Expression<Func<Habit, bool>>>(),
             Arg.Any<Func<IQueryable<Habit>, IQueryable<Habit>>?>(),
             Arg.Any<CancellationToken>()

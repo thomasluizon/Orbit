@@ -1764,6 +1764,12 @@
       "featureFolder": "Habits"
     },
     {
+      "request": "BulkUpdateHabitsCommand",
+      "response": "Result<BulkHabitMutationResult>",
+      "handlerFile": "src/Orbit.Application/Habits/Commands/BulkUpdateHabitsCommand.cs",
+      "featureFolder": "Habits"
+    },
+    {
       "request": "CheckInAccountabilityCommand",
       "response": "Result<Guid>",
       "handlerFile": "src/Orbit.Application/Accountability/Commands/CheckInAccountabilityCommand.cs",
@@ -2698,6 +2704,10 @@
     "endpointsWithoutHandler": [],
     "handlersWithoutEndpoint": [
       {
+        "request": "BulkUpdateHabitsCommand",
+        "handlerFile": "src/Orbit.Application/Habits/Commands/BulkUpdateHabitsCommand.cs"
+      },
+      {
         "request": "CheckReferralCompletionCommand",
         "handlerFile": "src/Orbit.Application/Referrals/Commands/CheckReferralCompletionCommand.cs"
       },
@@ -2733,12 +2743,12 @@
       "Behaviors": 4,
       "Calendar": 15,
       "Challenges": 15,
-      "Chat": 80,
+      "Chat": 84,
       "ChecklistTemplates": 5,
       "Common": 36,
       "Gamification": 33,
       "Goals": 35,
-      "Habits": 75,
+      "Habits": 78,
       "Marketing": 4,
       "Notifications": 13,
       "Profile": 37,
@@ -2942,12 +2952,12 @@
       "Behaviors": 14,
       "Calendar": 16,
       "Challenges": 14,
-      "Chat": 61,
+      "Chat": 63,
       "ChecklistTemplates": 9,
-      "Common": 193,
+      "Common": 197,
       "Gamification": 43,
       "Goals": 54,
-      "Habits": 90,
+      "Habits": 93,
       "Marketing": 6,
       "Notifications": 20,
       "Profile": 40,
@@ -3329,6 +3339,11 @@
         "references": []
       },
       {
+        "testClass": "BulkToolRepeatGuardTests",
+        "file": "tests/Orbit.Application.Tests/Chat/BulkToolRepeatGuardTests.cs",
+        "references": []
+      },
+      {
         "testClass": "ChatFaqCacheTests",
         "file": "tests/Orbit.Application.Tests/Chat/ChatFaqCacheTests.cs",
         "references": []
@@ -3421,7 +3436,15 @@
         "testClass": "BulkDeleteHabitsToolTests",
         "file": "tests/Orbit.Application.Tests/Chat/Tools/BulkDeleteHabitsToolTests.cs",
         "references": [
-          "BulkDeleteHabitsCommand"
+          "BulkDeleteHabitsCommand",
+          "Habit"
+        ]
+      },
+      {
+        "testClass": "BulkHabitToolArgumentsTests",
+        "file": "tests/Orbit.Application.Tests/Chat/Tools/BulkHabitToolArgumentsTests.cs",
+        "references": [
+          "Tag"
         ]
       },
       {
@@ -3436,8 +3459,8 @@
         "testClass": "BulkSkipHabitsToolTests",
         "file": "tests/Orbit.Application.Tests/Chat/Tools/BulkSkipHabitsToolTests.cs",
         "references": [
-          "Habit",
-          "HabitLog"
+          "BulkSkipHabitsCommand",
+          "Habit"
         ]
       },
       {
@@ -4186,6 +4209,16 @@
           "BulkSkipHabitsCommandHandler",
           "Habit",
           "HabitLog"
+        ]
+      },
+      {
+        "testClass": "BulkUpdateHabitsCommandHandlerTests",
+        "file": "tests/Orbit.Application.Tests/Commands/Habits/BulkUpdateHabitsCommandHandlerTests.cs",
+        "references": [
+          "BulkUpdateHabitsCommand",
+          "BulkUpdateHabitsCommandHandler",
+          "Habit",
+          "Tag"
         ]
       },
       {
@@ -5862,6 +5895,13 @@
         "file": "tests/Orbit.Application.Tests/Validators/BulkSkipHabitsCommandValidatorTests.cs",
         "references": [
           "BulkSkipHabitsCommand"
+        ]
+      },
+      {
+        "testClass": "BulkUpdateHabitsCommandValidatorTests",
+        "file": "tests/Orbit.Application.Tests/Validators/BulkUpdateHabitsCommandValidatorTests.cs",
+        "references": [
+          "BulkUpdateHabitsCommand"
         ]
       },
       {
