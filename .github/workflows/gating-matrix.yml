@@ -1,0 +1,51 @@
+name: Gating matrix
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: Gating matrix drift
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Test the generator
+        run: node --test tools/__tests__/gating-matrix.test.mjs
+
+      - name: Generate the gating matrix
+        run: node tools/gating-matrix.mjs
+
+      - name: Verify deterministic output
+        run: |
+          set -euo pipefail
+          cp gating-matrix.json "$RUNNER_TEMP/first-gating-matrix.json"
+          node tools/gating-matrix.mjs > /dev/null
+          if ! cmp -s gating-matrix.json "$RUNNER_TEMP/first-gating-matrix.json"; then
+            echo "::error::gating-matrix.json differs between two runs over the same tree"
+            diff "$RUNNER_TEMP/first-gating-matrix.json" gating-matrix.json | head -40 || true
+            exit 1
+          fi
+
+      - name: Publish the gating matrix
+        uses: actions/upload-artifact@v5
+        with:
+          name: gating-matrix
+          path: gating-matrix.json
+          if-no-files-found: error
+          retention-days: 14

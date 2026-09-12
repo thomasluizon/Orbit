@@ -60,3 +60,6 @@ caddy_config/
 
 ## Claude Code worktrees
 .claude/worktrees/
+
+## Generated gating matrix
+/gating-matrix.json
