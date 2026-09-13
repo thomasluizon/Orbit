@@ -27,7 +27,8 @@ public record StreakInfoResponse(
     DateOnly? RepairDate,
     int RepairsRemainingThisMonth,
     DateOnly? LastFreezeCoveredDate = null,
-    int? FreezeBankRemaining = null);
+    int? FreezeBankRemaining = null,
+    IReadOnlyList<DateOnly>? RepairableGapDates = null);
 
 public record GetStreakInfoQuery(Guid UserId) : IRequest<Result<StreakInfoResponse>>, IConcurrencyRetryable;
 
@@ -94,6 +95,10 @@ public class GetStreakInfoQueryHandler(
             cancellationToken);
         var isRepairAvailable = repair?.IsAvailable == true;
         DateOnly? repairDate = isRepairAvailable ? repair!.MissedDate : null;
+        var repairableGapDates = await userStreakService.GetRepairableGapDatesAsync(
+            request.UserId,
+            today,
+            cancellationToken);
 
         if (isRepairAvailable)
         {
@@ -138,6 +143,7 @@ public class GetStreakInfoQueryHandler(
             repairDate,
             freezesAvailableToUse,
             lastFreezeCoveredDate,
-            freezeBankRemaining));
+            freezeBankRemaining,
+            repairableGapDates));
     }
 }

@@ -263,6 +263,50 @@ public class StreakGapRepairTests
         state!.CurrentStreak.Should().BeGreaterThan(0);
     }
 
+    [Fact]
+    public async Task DailyTwoDayGap_IsReturned()
+    {
+        var streak = await GetStreakInfo();
+
+        streak.RepairableGapDates.Should().Equal(_today.AddDays(-2), _today.AddDays(-1));
+    }
+
+    [Fact]
+    public async Task WeeklyTwoOccurrenceGap_IsReturnedAndAcceptedWhenEchoed()
+    {
+        _habit = SetWeeklyHistory(gapOccurrences: 2);
+        SetUserProperty(nameof(User.StreakFreezesAccumulated), 2);
+        var streak = await GetStreakInfo();
+        var dates = streak.RepairableGapDates!;
+
+        dates.Should().Equal(_today.AddDays(-8), _today.AddDays(-1));
+
+        var (handler, _) = BuildRepairHandler();
+        var repaired = await handler.Handle(new RepairStreakGapCommand(_user.Id, dates), CancellationToken.None);
+
+        repaired.IsSuccess.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GapWithMissedPredecessor_IsNotReturnedPartially()
+    {
+        _habit = SetHistory(_today, gapLength: 4);
+
+        var streak = await GetStreakInfo();
+
+        streak.RepairableGapDates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GapOpeningLookbackWindow_IsNotReturned()
+    {
+        _habit = SetHistory(_today, AppConstants.MaxStreakLookbackDays, precedingCompletions: 0);
+
+        var streak = await GetStreakInfo();
+
+        streak.RepairableGapDates.Should().BeEmpty();
+    }
+
     /// <summary>Schedule-awareness widens which gaps are contiguous; it never waives the preceding
     /// occurrence. With the prior week's occurrence missed too, one selected date is not a whole gap.</summary>
     [Fact]
@@ -445,6 +489,16 @@ public class StreakGapRepairTests
     }
 
     [Fact]
+    public async Task CompletionToday_DoesNotHideEarlierGap()
+    {
+        _habit.Log(_today, advanceDueDate: false);
+
+        var streak = await GetStreakInfo();
+
+        streak.RepairableGapDates.Should().Equal(_today.AddDays(-2), _today.AddDays(-1));
+    }
+
+    [Fact]
     public async Task NoPriorStreak_IsUnavailable()
     {
         _logs.FindAsync(Arg.Any<Expression<Func<HabitLog, bool>>>(), Arg.Any<CancellationToken>()).Returns([]);
@@ -472,9 +526,12 @@ public class StreakGapRepairTests
     /// missed; the earlier occurrences are completed unless <paramref name="skipMostRecentCompletion"/>
     /// leaves the one directly before the gap missed too.
     /// </summary>
-    private Habit SetWeeklyHistory(int priorOccurrences = 3, bool skipMostRecentCompletion = false)
+    private Habit SetWeeklyHistory(
+        int priorOccurrences = 3,
+        bool skipMostRecentCompletion = false,
+        int gapOccurrences = 1)
     {
-        var firstOccurrence = _today.AddDays(-1 - (7 * priorOccurrences));
+        var firstOccurrence = _today.AddDays(-1 - (7 * (priorOccurrences + gapOccurrences - 1)));
         var habit = Habit.Create(new HabitCreateParams(_user.Id, "Long run", FrequencyUnit.Week, 1,
             DueDate: firstOccurrence)).Value;
         typeof(Habit).GetProperty(nameof(Habit.CreatedAtUtc))!.SetValue(habit,
@@ -569,8 +626,7 @@ public class StreakGapRepairTests
         var flags = Substitute.For<IFeatureFlagService>();
         flags.GetEnabledKeysForUserAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(Array.Empty<string>());
         _users.GetByIdAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(_user);
-        var queryHandler = new GetStreakInfoQueryHandler(_users, _freezes, _dateService, _service,
-            flags, Substitute.For<IProductAnalytics>(), NullLogger<GetStreakInfoQueryHandler>.Instance);
+        var queryHandler = BuildStreakInfoHandler(flags);
         var sender = Substitute.For<ISender>();
         sender.Send(Arg.Any<GetStreakInfoQuery>(), Arg.Any<CancellationToken>())
             .Returns(call => queryHandler.Handle(call.Arg<GetStreakInfoQuery>(), call.Arg<CancellationToken>()));
@@ -578,6 +634,20 @@ public class StreakGapRepairTests
             flags, unitOfWork, sender, NullLogger<RepairStreakGapCommandHandler>.Instance);
         return (handler, staged);
     }
+
+    private async Task<StreakInfoResponse> GetStreakInfo()
+    {
+        var flags = Substitute.For<IFeatureFlagService>();
+        flags.GetEnabledKeysForUserAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(Array.Empty<string>());
+        _users.GetByIdAsync(_user.Id, Arg.Any<CancellationToken>()).Returns(_user);
+        var result = await BuildStreakInfoHandler(flags)
+            .Handle(new GetStreakInfoQuery(_user.Id), CancellationToken.None);
+        return result.Value;
+    }
+
+    private GetStreakInfoQueryHandler BuildStreakInfoHandler(IFeatureFlagService flags) =>
+        new(_users, _freezes, _dateService, _service, flags,
+            Substitute.For<IProductAnalytics>(), NullLogger<GetStreakInfoQueryHandler>.Instance);
 
     private Habit SetHistory(DateOnly today, int gapLength, int frequencyQuantity = 1, int precedingCompletions = 3)
     {
